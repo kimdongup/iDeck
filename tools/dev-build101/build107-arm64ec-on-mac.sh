@@ -46,6 +46,19 @@ for old,new in changes:
 p.write_text(s)
 print("ARM64EC header compatibility applied in detached worktree")
 PY_PATCH
+# ARM64EC Clang defines __x86_64__ for ABI compatibility while assembling
+# ARM64 instructions. Keep LibTomCrypt off its x86 inline-asm rotate path;
+# its portable rotation implementations have defined masking behavior.
+python3 - "$SRC/libs/tomcrypt/src/headers/tomcrypt_macros.h" <<'PY_TOMCRYPT'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1]); s=p.read_text()
+old='#elif !defined(__STRICT_ANSI__) && defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__)) && !defined(INTEL_CC) && !defined(LTC_NO_ASM)'
+new='#elif !defined(__STRICT_ANSI__) && defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__)) && !defined(__arm64ec__) && !defined(INTEL_CC) && !defined(LTC_NO_ASM)'
+if old in s: p.write_text(s.replace(old,new,1))
+elif new not in s: raise SystemExit("Unexpected LibTomCrypt rotate macro layout")
+print("ARM64EC LibTomCrypt rotate path: portable C")
+PY_TOMCRYPT
 # Madeira iOS port references a generated header four levels above the Wine
 # source. An external worktree changes that relative path. Rewrite only in
 # the detached source tree to point to the canonical generated header.
