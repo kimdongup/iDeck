@@ -162,6 +162,14 @@ for name in sys.argv[2:]:
     print('PASS',name,'ARM64',len(b),'bytes')
 PY_DLL_CHECK
 
+# Fail before Xcode if the observed runtime DLLs are absent or PE imports remain unresolved.
+python3 "$ROOT/tools/diagnostics/wine-pe-closure.py" \
+  --root "$ROOT" --arch aarch64-windows \
+  --require-runtime rpcrt4 --require-runtime user32 \
+  --require-runtime gdi32 --require-runtime advapi32 \
+  --require-runtime ucrtbase --strict \
+  --json "$WORK/diagnostics/build103-arm64-pe-closure-postbuild.json"
+
 # The app requires an actual Wine registry/skeleton archive, never a dummy.
 # Build it from a fresh host wineboot inside the external SSD if absent.
 PREFIX="$ROOT/app/Madeira/prefix-template.tar.gz"
