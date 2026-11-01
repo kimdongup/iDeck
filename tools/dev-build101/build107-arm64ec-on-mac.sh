@@ -46,6 +46,25 @@ for old,new in changes:
 p.write_text(s)
 print("ARM64EC header compatibility applied in detached worktree")
 PY_PATCH
+# The hybrid winegcc has an explicit arm64ec clang driver but needs native
+# aarch64 clang to assemble the second spec.o.
+python3 - "$SRC/tools/winegcc/winegcc.c" <<'PY_WINEGCC'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1]); s=p.read_text()
+old='ret = strarray_fromstring( cc_cmd, " " );
+        if (target.platform == PLATFORM_WINDOWS) add_clang_options( target_name, &ret );'
+new='''if (target_name && !strncmp( target_name, "aarch64-", 8 ) &&
+            strstr( cc_cmd, "arm64ec-w64-mingw32-clang" ))
+        {
+            ret = strarray_fromstring( "aarch64-w64-mingw32-clang", " " );
+        }
+        else ret = strarray_fromstring( cc_cmd, " " );
+        if (target.platform == PLATFORM_WINDOWS) add_clang_options( target_name, &ret );'''
+if old in s: p.write_text(s.replace(old,new,1))
+elif new not in s: raise SystemExit("Unexpected winegcc compiler selection")
+print("ARM64X native spec compiler patched")
+PY_WINEGCC
 # ARM64EC Clang defines __x86_64__ for ABI compatibility while assembling
 # ARM64 instructions. Keep LibTomCrypt off its x86 inline-asm rotate path;
 # its portable rotation implementations have defined masking behavior.
