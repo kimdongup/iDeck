@@ -3349,6 +3349,15 @@ NTSTATUS WINAPI NtTerminateProcess( HANDLE handle, LONG exit_code )
     BOOL self;
 
 #ifdef WINE_IOS
+    /* Build108: do not depend on WINEDEBUG channel filtering for the first
+     * DLL_NOT_FOUND termination. PEB and TEB distinguish simultaneous Wine
+     * pseudo-processes; emit before the server call or any exit path. */
+    if ((unsigned int)exit_code == 0xc0000135u)
+    {
+        TEB *teb = NtCurrentTeb();
+        dprintf( 2, "[build108-first-dll-not-found] peb=%p teb=%p handle=%p exit=0x%08x\n",
+                 teb ? teb->Peb : NULL, teb, handle, (unsigned int)exit_code );
+    }
     if ((unsigned int)exit_code == 0xE0000008u && handle == NtCurrentProcess())
         ios_term_oom_record( NtCurrentTeb() );
     {
