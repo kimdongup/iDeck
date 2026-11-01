@@ -44,7 +44,28 @@ for old,new in changes:
 p.write_text(s)
 print("ARM64EC header compatibility applied in detached worktree")
 PY_PATCH
-[[ ! -f "$B/config.status" || -f "$B/Makefile" ]] || { echo "Incomplete ARM64EC configure"; exit 3; }
+# Madeira iOS port references a generated header four levels above the Wine
+# source. An external worktree changes that relative path. Rewrite only in
+# the detached source tree to point to the canonical generated header.
+python3 - "$SRC" "$ROOT/build/madeira_cfg.h" <<'PY_MADEIRA'
+from pathlib import Path
+import os,sys
+src=Path(sys.argv[1]); target=Path(sys.argv[2])
+if not target.is_file(): raise SystemExit("Missing canonical Madeira config: "+str(target))
+for rel in ("dlls/ntdll/unix/sync.c","dlls/ntdll/unix/system.c"):
+    p=src/rel
+    s=p.read_text()
+    marker='../../../../build/madeira_cfg.h'
+    corrected=os.path.relpath(target,p.parent)
+    if marker in s: p.write_text(s.replace(marker,corrected))
+    elif corrected not in s: raise SystemExit("Unexpected Madeira include: "+str(p))
+    print("Madeira include",rel,"->",corrected)
+PY_MADEIRA
+# A previous configure may have produced config.status before makedep failed.
+# Resume its generated rules without deleting the partial build directory.
+if [[ -f "$B/config.status" && ! -f "$B/Makefile" ]]; then
+  ( cd "$B" && ./config.status )
+fi
 if [[ ! -f "$B/Makefile" ]]; then
   mkdir -p "$B"
   ( cd "$B" && "$SRC/configure" \
