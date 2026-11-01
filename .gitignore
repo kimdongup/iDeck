@@ -196,3 +196,7 @@ Steam32OfficialClient/
 app/Frameworks/StikJIT.xcframework/ios-arm64/StikJIT.framework/Info.plist
 app/Frameworks/StikJIT.xcframework/ios-arm64/StikJIT.framework/Modules/StikJIT.swiftmodule/*.swiftmodule
 app/Frameworks/StikJIT.xcframework/ios-arm64/StikJIT.framework/Modules/StikJIT.swiftmodule/*.swiftsourceinfo
+
+# Generated Python bytecode (local host validation)
+__pycache__/
+*.pyc

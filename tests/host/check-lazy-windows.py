@@ -33,7 +33,7 @@ if " *           ios_laa_forced / ios_wow_ceiling_for_charact" in block:
 # ---- call-site invariants
 init = src[src.index("void virtual_init(void)\n{"):]
 init = init[:init.index("\n}\n")]
-assert re.findall(r"ios_wow_\w+\(", init) == ["ios_wow_session_start("], "virtual_init reserves nothing itself"
+assert re.findall(r"ios_wow_\w+\(", init) == ["ios_wow_va_census_log(", "ios_wow_va_census_log(", "ios_wow_session_start(", "ios_wow_va_census_log("], "virtual_init only probes the VA then calls the existing reservation hook"
 mv = src[src.index("static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,"):]
 mv = mv[:mv.index("\ndone:\n")]
 assert "if ((ios_wow_window_count || ios_wow_placeholder_count) &&\n            !ios_wow_limits_in_window( limit_low, limit_high ))" in mv
@@ -49,6 +49,7 @@ harness = r"""
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include "wow_va_probe.h"
 #include <stddef.h>
 #include <errno.h>
 #include <pthread.h>
@@ -63,6 +64,7 @@ typedef int kern_return_t; typedef unsigned int mach_msg_type_number_t; typedef 
 typedef uint64_t mach_vm_address_t, mach_vm_size_t; typedef unsigned int mach_port_t; typedef int *vm_region_info_t;
 typedef struct { int protection; } vm_region_basic_info_data_64_t;
 #define KERN_SUCCESS 0
+#define KERN_INVALID_ADDRESS 1
 #define TASK_VM_INFO 22
 #define TASK_VM_INFO_COUNT 1
 #define VM_REGION_BASIC_INFO_64 9
@@ -82,6 +84,8 @@ static struct region map[256]; static int nmap;
 static unsigned long long fake_max;
 static int mmap_calls, task_info_calls;
 static int ios_cage_holdback_live, ios_cage_window_tail_live;
+/* App-owned early-hold handshake (real variables live in JITAllocator.c). */
+uint64_t madeira_wow_early_base, madeira_wow_early_length;
 static const ULONG_PTR host_page_size = 0x4000;
 static ULONG_PTR ios_usable_va_floor = 0x7038000000ULL, ios_furniture_ceiling = 0x73ffff0000ULL;
 static void *user_space_limit = (void *)0x7fffffff0000ULL;
@@ -165,6 +169,20 @@ int main( int argc, char **argv ) {
     add_region( 0x7000000000ULL, 0x7038000000ULL, 1 );        /* JIT pool RW alias */
     if (fake_max > IOS_CAGE_BASE + IOS_CAGE_REAL_SIZE && strcmp( mode, "bias" )) { add_region( IOS_CAGE_BASE, IOS_CAGE_BASE + IOS_CAGE_REAL_SIZE, 0 ); ios_cage_holdback_live = 1; }
     if (!strcmp( mode, "main-i386" )) ios_main_image_i386 = 1;
+    if (!strcmp( mode, "preheld" ) || !strcmp( mode, "preheld-invalid" ) ||
+        !strcmp( mode, "preheld-outside" ))
+    {
+        const ULONG_PTR base = !strcmp( mode, "preheld-outside" )
+            ? 0xc00000000ULL : 0x400000000ULL;  /* invalid: 48GB outside small-map band */
+        madeira_wow_early_base = base;
+        madeira_wow_early_length = IOS_WOW_WINDOW_SIZE + 0x4000;
+        add_region( base, base + madeira_wow_early_length,
+                    !strcmp( mode, "preheld-invalid" ) ? 1 : 0 );
+        /* Below the standard 12GB reserve gate AFTER the early hold: an
+         * adopted already-owned slot must not be charged a second time. */
+        if (base == 0x400000000ULL)
+            add_region( base + madeira_wow_early_length, 0xf00000000ULL, 1 );
+    }
     ios_wow_session_start();                                   /* the virtual_init hook */
     printf( "start armed=%d mmap=%d taskinfo=%d windows=%u placeholders=%u\n", ios_wow_session_armed(),
             mmap_calls, task_info_calls, ios_wow_window_count, ios_wow_placeholder_count );
@@ -183,6 +201,14 @@ int main( int argc, char **argv ) {
                     (unsigned long long)last_base, mmap_calls - before );
         }
         printf( "teardowns=%d\n", teardowns );
+        return 0;
+    }
+    if (!strncmp( mode, "preheld", 7 )) {
+        int before = mmap_calls;
+        run_proc( 0 );
+        printf( "early status=%x base=%llx new_mappings=%d reserve_lists=%d\n",
+                (unsigned)last_status, (unsigned long long)last_base,
+                mmap_calls - before, reserved_areas );
         return 0;
     }
     if (!strcmp( mode, "main-i386" )) {
@@ -216,7 +242,7 @@ with tempfile.TemporaryDirectory() as t:
     exe = Path(t) / "lazy"
     subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wno-unused-function", "-Wno-unused-variable",
                     "-Wno-unused-but-set-variable", "-pthread", "-fsanitize=address,undefined",
-                    str(c), "-o", str(exe)], check=True)
+                    "-I", str(root / "build"), str(c), "-o", str(exe)], check=True)
 
     for m in (BIG, TABLET):
         out, err = run(exe, "64bit", m)
@@ -229,6 +255,17 @@ with tempfile.TemporaryDirectory() as t:
     assert "start armed=1 mmap=1 taskinfo=1 windows=0 placeholders=1" in out, out + err
     assert re.search(r"main status=0 base=7100000000 new_mappings=0", out), out + err
     print("PASS: a published 32-bit main image reserves exactly one window at virtual_init, then adopts it")
+
+    out, err = run(exe, "preheld", TABLET)
+    assert "start armed=1 mmap=0 taskinfo=1 windows=0 placeholders=1" in out, out + err
+    assert "early status=0 base=400000000 new_mappings=0 reserve_lists=1" in out, out + err
+    assert "imported pre-JIT 4GB+guard" in err and "adopted placeholder" in err, err
+    print("PASS: a pre-JIT app-owned 4GB+guard hold is imported and reused at zero new mappings despite <12GB free")
+
+    out, err = run(exe, "preheld-invalid", TABLET)
+    assert "import REJECTED" in err and "placeholders=0" in out, out + err
+    assert "early status=c0000017 base=0" in out, out + err
+    print("PASS: inaccessible-state validation rejects a writable/invalid app hold and falls back safely")
 
     out, err = run(exe, "procs", TABLET, "3")
     assert re.search(r"proc0 status=0 base=[4-9a]00000000 new_mappings=1\n", out), out + err

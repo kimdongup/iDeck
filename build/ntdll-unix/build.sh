@@ -109,7 +109,8 @@ compile_unixlib "$WINE_SRC/dlls/secur32/schannel_gnutls.c" "secur32_unixlib" "se
 # build tree, so that include dir is named explicitly here.
 compile_unixlib "$BUILD_DIR/dwrite_freetype_ios.c" "dwrite_unixlib" "dwrite" \
     -I"$WINE_SRC/dlls/dwrite" -I"$REPO_ROOT/research/freetype/include" \
-    -I"$REPO_ROOT/wine/build-arm64ec/include"
+    -I"$REPO_ROOT/build/freetype-ios/build/include" \
+    -I"$WINE_BUILD/include"
 compile_unixlib "$CRYPTO_DIR/crypt32_unixlib_ios.c" "crypt32_unixlib" "crypt32" \
     -I"$WINE_SRC/dlls/crypt32" -I"$GNUTLS_PREFIX/include" \
     -include "$CRYPTO_DIR/ios_gnutls_shim.h"
@@ -205,6 +206,13 @@ echo ""
 echo "Results: $SUCCEEDED succeeded, $FAILED failed"
 if [ -n "$FAILED_FILES" ]; then
     echo "Failed:$FAILED_FILES"
+fi
+
+# Never archive old or missing objects when a compile failed. In the original
+# script these failures were printed but ar still ran, masking the root cause.
+if [ "$FAILED" -gt 0 ]; then
+    echo "Stopping before archive: $FAILED translation unit(s) failed."
+    exit 1
 fi
 
 echo ""

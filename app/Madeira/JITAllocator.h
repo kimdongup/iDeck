@@ -68,6 +68,17 @@ bool jit_cs_status(uint32_t *flags);
 // when the kernel does not report it.
 bool jit_task_map_range(uint64_t *min_address, uint64_t *max_address);
 
+// Read-only VM-hole and 4GB-aligned-slot inventory, written to Madeira logs.
+// Called only for Steam sessions when MADEIRA_WOW_VA_CENSUS=1.
+void jit_wow_va_probe(const char *stage);
+// Experimental Steam-only pre-JIT host window, OFF by default.
+// These globals are published only after a complete, no-overwrite 4GB+guard
+// Mach reservation; Wine validates them before registering a placeholder.
+extern uint64_t madeira_wow_early_base;
+extern uint64_t madeira_wow_early_length;
+void jit_wow_early_hold_try(void);
+
+
 // Memory this process may still allocate before the system's limit.
 uint64_t jit_available_memory(void);
 

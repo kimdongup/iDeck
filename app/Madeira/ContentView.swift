@@ -2780,6 +2780,50 @@ struct ContentView: View {
                 _ = try? MadeiraConfig.applyGame(nil)   // no library game: no game's own lines
             }
 
+            // iDeck/Steam: a 64-bit explorer session starts the 32-bit Steam
+            // client as a CHILD. The default lazy WoW64 window reservation
+            // happens after Wine/Metal/FEX have filled the address map; Build 99
+            // on iPhone 15 Pro Max had only 539 MB free VA at that point, so a
+            // 4 GB guest window could not be allocated (STATUS_NO_MEMORY).
+            // Reserve placeholders during virtual_init instead, before PE
+            // loading and the FEX arena. Only Steam UI sessions opt in; normal
+            // game sessions retain the upstream lazy-window policy.
+            // madeira.cfg env.MADEIRA_WOW_PLACEHOLDERS=0 is an A/B escape hatch.
+            if steamUI {
+                let configured = MadeiraConfig.get("env.MADEIRA_WOW_PLACEHOLDERS")?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let value = configured == "0" ? "0" : "1"
+                setenv("MADEIRA_WOW_PLACEHOLDERS", value, 1)
+                logStore.log("[wow-window] Steam early placeholders=\(value) (0 disables; before Wine virtual_init)")
+
+                // Read-only kernel VM inventory; no allocations or guard changes.
+                // Opt in only: repeated 100k-region scans after JIT are
+                // incomplete and can add avoidable startup latency.
+                let census = MadeiraConfig.get("env.MADEIRA_WOW_VA_CENSUS")?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                setenv("MADEIRA_WOW_VA_CENSUS", census == "1" ? "1" : "0", 1)
+                jit_wow_va_probe("app-pre-jit")
+
+                // EXPLICIT EXPERIMENT ONLY: a single non-overwriting 4GB+guard
+                // host hold before the JIT pool. Wine checks its ownership and
+                // adopts it after virtual_init; absent the switch, no VM hold.
+                // The iPhone's earlier Build 99 log is insufficient evidence to
+                // enable this by default.
+                let early = MadeiraConfig.get("env.MADEIRA_WOW_EARLY_HOLD")?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                setenv("MADEIRA_WOW_EARLY_HOLD", early == "1" ? "1" : "0", 1)
+                if early == "1" {
+                    jit_wow_early_hold_try()
+                    jit_wow_va_probe("app-after-early-hold")
+                }
+            } else {
+                // Do not carry the preceding Steam session's VA policy into
+                // unrelated native games in the same app process.
+                unsetenv("MADEIRA_WOW_PLACEHOLDERS")
+                unsetenv("MADEIRA_WOW_VA_CENSUS")
+                unsetenv("MADEIRA_WOW_EARLY_HOLD")
+            }
+
             // Step 1: Allocate JIT pool (BRK suspends entire process)
             // 128 MB was enough for cube but Thumper exhausts it (more PE
             // copies + larger FEX block cache). Desktop mode holds the
@@ -3093,6 +3137,7 @@ struct ContentView: View {
             let pool = StikJITHelper.allocatePool(poolSize: poolSizeMB * 1024 * 1024)
             let elapsed = CFAbsoluteTimeGetCurrent() - t0
             winios_phase("pool-ready")
+            if steamUI { jit_wow_va_probe("app-post-jit") }
             logStore.log("BRK suspension lasted \(String(format: "%.2f", elapsed))s")
 
             // Arena carver self-test. Documents/madeira-arena-test.txt holds
@@ -3345,6 +3390,7 @@ struct ContentView: View {
             JITNetworkShortcut.restoreBlocking()
 
             // Step 2: Start wineserver
+            if steamUI { jit_wow_va_probe("app-pre-wineserver") }
             self.startWineserver()
             winios_phase("wineserver-up")
 
@@ -3363,6 +3409,7 @@ struct ContentView: View {
                 Thread.sleep(forTimeInterval: 2.0)
             }
             winios_phase("wine-start")
+            if steamUI { jit_wow_va_probe("app-pre-wine") }
             self.startWineProcess()
 
             // Step 4: Wait for Wine to finish instead of fixed timer

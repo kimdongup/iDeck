@@ -1,5 +1,6 @@
 #include "JITAllocator.h"
 #include "../../build/madeira_cfg.h"   /* metal-validation (ml1249) */
+#include "../../build/wow_va_probe.h"   /* read-only WoW64 guest VA census */
 
 #include <mach/mach.h>
 #include <mach/vm_map.h>
@@ -30,6 +31,12 @@ extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
  * exported by libsystem_kernel and are the only calls that report a region's
  * max_protection -- which the W^X probe needs, since the failure mode is a
  * successful-looking call whose W was silently stripped. */
+/* Same non-overwriting fixed-map primitive as Wine's anon_mmap_tryfixed
+ * branch. VM_FLAGS_OVERWRITE is deliberately NEVER supplied here. */
+extern kern_return_t mach_vm_map(vm_map_t, mach_vm_address_t *, mach_vm_size_t,
+                                  mach_vm_offset_t, int, mem_entry_name_port_t,
+                                  memory_object_offset_t, boolean_t, vm_prot_t,
+                                  vm_prot_t, vm_inherit_t);
 extern kern_return_t mach_vm_region(vm_map_t, mach_vm_address_t *, mach_vm_size_t *,
                                     vm_region_flavor_t, vm_region_info_t,
                                     mach_msg_type_number_t *, mach_port_t *);
@@ -433,6 +440,144 @@ bool jit_task_map_range(uint64_t *min_address, uint64_t *max_address) {
     *min_address = vmi.min_address;
     *max_address = vmi.max_address;
     return true;
+}
+
+
+/* Steam-only read-only inventory before Wine's VM tracker is initialized.
+ * Query the kernel's actual mapped regions; a free-total measurement by itself
+ * cannot tell whether a single 4GB-aligned guest window can be reserved. */
+static int jit_wow_next_region(void *unused, uint64_t query,
+                                uint64_t *base, uint64_t *length)
+{
+    mach_vm_address_t address = (mach_vm_address_t)query;
+    mach_vm_size_t size = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    kern_return_t kr;
+    (void)unused;
+
+    kr = mach_vm_region(mach_task_self(), &address, &size,
+                        VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
+                        &count, &object);
+    if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
+    if (kr == KERN_INVALID_ADDRESS) return 0;
+    if (kr != KERN_SUCCESS) return -1;
+    *base = (uint64_t)address;
+    *length = (uint64_t)size;
+    return 1;
+}
+
+void jit_wow_va_probe(const char *stage)
+{
+    uint64_t low = 0, max = 0, band_lo, band_hi;
+    struct wow_va_probe_stats stats;
+    const char *enabled = getenv("MADEIRA_WOW_VA_CENSUS");
+
+    if (!enabled || strcmp(enabled, "1")) return;
+    if (!jit_task_map_range(&low, &max))
+    {
+        jit_log("[wow-va] stage=%s map unavailable", stage ? stage : "unknown");
+        return;
+    }
+    /* Same 16..44GB candidate band used by virtual_ios.c on a 63GB map;
+     * large-map placement is published by the Wine-side probe. */
+    band_lo = max < UINT64_C(0x7000000000) ? UINT64_C(0x400000000) : UINT64_C(0x7038000000);
+    band_hi = max < UINT64_C(0x7000000000) ? UINT64_C(0xb00000000) : UINT64_C(0x7400000000);
+    if (band_hi > max) band_hi = max;
+    stats = wow_va_probe_scan(max, band_lo, band_hi, jit_wow_next_region, NULL);
+    jit_log("[wow-va] stage=%s map_end=0x%llx free_mb=%llu largest_mb=%llu largest_at=0x%llx band=[0x%llx,0x%llx) candidate=0x%llx aligned_slots=%llu regions=%llu complete=%d",
+            stage ? stage : "unknown",
+            (unsigned long long)max,
+            (unsigned long long)(stats.total_free >> 20),
+            (unsigned long long)(stats.largest_free >> 20),
+            (unsigned long long)stats.largest_at,
+            (unsigned long long)band_lo, (unsigned long long)band_hi,
+            (unsigned long long)stats.first_aligned,
+            (unsigned long long)stats.aligned_slots,
+            (unsigned long long)stats.visited_regions, stats.complete);
+}
+
+
+/* Off by default. JIT/Wine can use several GB of VA on a 63GB task, so do
+ * not even attempt an experimental hold unless the user explicitly opts in.
+ * App-owned mappings persist until process exit; never release one from Wine
+ * after a child has begun adopting it. */
+uint64_t madeira_wow_early_base;
+uint64_t madeira_wow_early_length;
+
+void jit_wow_early_hold_try(void)
+{
+    const uint64_t gib = UINT64_C(1) << 30;
+    const uint64_t size = WOW_VA_GUEST_WINDOW;
+    const uint64_t guard = (uint64_t)sysconf(_SC_PAGESIZE);
+    uint64_t low = 0, top = 0, band_lo, band_hi;
+    struct wow_va_probe_stats stats;
+    unsigned tries;
+
+    if (!getenv("MADEIRA_WOW_EARLY_HOLD") ||
+        strcmp(getenv("MADEIRA_WOW_EARLY_HOLD"), "1")) return;
+    if (madeira_wow_early_base) return;
+    if (guard < 4096 || guard > 65536 ||
+        !jit_task_map_range(&low, &top) || top < 48*gib)
+    {
+        jit_log("[wow-early] skipped: map or page size unavailable");
+        return;
+    }
+
+    /* Same policy candidate region as ios_wow_band() on a small map. On a
+     * 512GB map only use the normal Wine furniture band. */
+    band_lo = top < UINT64_C(0x7000000000)
+        ? UINT64_C(0x400000000) : UINT64_C(0x7038000000);
+    band_hi = top < UINT64_C(0x7000000000)
+        ? UINT64_C(0xb00000000) : UINT64_C(0x7400000000);
+    if (band_hi > top) band_hi = top;
+    stats = wow_va_probe_scan(top, band_lo, band_hi, jit_wow_next_region, NULL);
+    /* Preserve the existing 8GB safety margin; never zero it to bypass the
+     * failure seen on the user's Build 99 device. No claim of guest success. */
+    if (!stats.complete || stats.total_free < size + 8*gib)
+    {
+        jit_log("[wow-early] skipped: total free VA=%llu MB below 4GB+8GB safety gate or incomplete map",
+                (unsigned long long)(stats.total_free >> 20));
+        return;
+    }
+
+    for (tries = 0; tries < 7 && stats.complete && stats.first_aligned; tries++)
+    {
+        const uint64_t candidate = stats.first_aligned;
+        mach_vm_address_t result = (mach_vm_address_t)candidate;
+        kern_return_t kr;
+
+        if (candidate > band_hi || band_hi - candidate < size + guard) break;
+        /* Important: VM_FLAGS_FIXED without VM_FLAGS_OVERWRITE does not
+         * replace an occupied region. A concurrent allocation must simply
+         * make this attempt fail. No MAP_FIXED, no deallocation of neighbours. */
+        kr = mach_vm_map(mach_task_self(), &result, (mach_vm_size_t)(size + guard),
+                         0, VM_FLAGS_FIXED, MEMORY_OBJECT_NULL, 0, 0,
+                         VM_PROT_NONE, VM_PROT_ALL, VM_INHERIT_COPY);
+        if (kr == KERN_SUCCESS && result == candidate)
+        {
+            /* Both fields publish only after the kernel has returned a full
+             * 4GB+guard mapping. Wine must verify the mapping before import. */
+            madeira_wow_early_length = size + guard;
+            madeira_wow_early_base = candidate;
+            jit_log("[wow-early] held B=0x%llx size_mb=4096 guard=%llu kr=0 "
+                    "(experimental; Wine must adopt)",
+                    (unsigned long long)candidate, (unsigned long long)guard);
+            return;
+        }
+        if (kr == KERN_SUCCESS) /* unexpected relocated mapping: only own it */
+        {
+            extern kern_return_t mach_vm_deallocate(vm_map_t, mach_vm_address_t, mach_vm_size_t);
+            mach_vm_deallocate(mach_task_self(), result, (mach_vm_size_t)(size + guard));
+        }
+        jit_log("[wow-early] candidate=0x%llx 4GB+guard reservation refused kr=%d",
+                (unsigned long long)candidate, (int)kr);
+        band_lo = candidate + size;
+        if (band_lo >= band_hi) break;
+        stats = wow_va_probe_scan(top, band_lo, band_hi, jit_wow_next_region, NULL);
+    }
+    jit_log("[wow-early] no no-overwrite 4GB+guard slot accepted; default mapping unchanged");
 }
 
 uint64_t jit_available_memory(void) {

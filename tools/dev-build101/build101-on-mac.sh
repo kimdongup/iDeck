@@ -1,0 +1,243 @@
+#!/bin/bash
+# Build a NEW, separately identified iDeck Build101 test IPA on macOS.
+# Does not install/uninstall anything on the iPhone.
+# Default: audit only. Opt in to --build once dependencies are complete.
+set -euo pipefail
+
+ROOT="${BUILD101_ROOT:-/Volumes/Repository/cokacremote/iDeckRuntimeLab/iDeck}"
+WORK="/Volumes/Repository/cokacremote/iDeckRuntimeLab"
+BUNDLE="${BUILD101_BUNDLE_ID:-com.kimdongup.ideck.build100}"
+TEAM="${BUILD101_TEAM_ID:-KADCK35KR7}"
+# Source repo is already on the APFS external SSD. macOS disk audit on
+# 2026-10-31 confirmed 346 GiB free there vs 7.2 GiB on internal Data.
+# Store DerivedData, test app, IPA and logs on that same external volume.
+# BUILD101_DERIVED_DATA / BUILD101_OUTPUT can override independently.
+# Preserve Build100 toolchains/prefix and cached DerivedData for incremental builds.
+ARTIFACTS="$WORK/build100-artifacts"
+DERIVED="${BUILD101_DERIVED_DATA:-$ARTIFACTS/DerivedData/iDeckBuild100}"
+OUT="${BUILD101_OUTPUT:-$WORK/build101-artifacts/Output}"
+MODE="${1:---audit}"
+
+if [[ "$MODE" != "--audit" && "$MODE" != "--build" ]]; then
+  echo "Usage: $0 [--audit | --build]"
+  exit 2
+fi
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "This script must run on the user's Mac with Xcode, not inside Linux."
+  exit 2
+fi
+if [[ ! -d "$ROOT/app/Madeira.xcodeproj" ]]; then
+  echo "Missing app project: $ROOT/app/Madeira.xcodeproj"
+  exit 2
+fi
+if [[ ! "$BUNDLE" =~ ^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z0-9_-]+)+$ ]]; then
+  echo "Invalid bundle ID: $BUNDLE"
+  exit 2
+fi
+if [[ "$BUNDLE" == "com.kuschqin.madeira.steamui" || "$BUNDLE" == "com.kuscholar.ideck.steamui" ]]; then
+  echo "Refusing to use a publisher-owned or upstream bundle ID on this Personal Team."
+  exit 2
+fi
+if [[ ! "$TEAM" =~ ^[A-Za-z0-9]{10}$ ]]; then
+  echo "Expected 10-character Apple Team ID."
+  exit 2
+fi
+
+mkdir -p "$WORK/diagnostics"
+echo "=== Build101 readiness ==="
+echo "Bundle: $BUNDLE"
+echo "Team: $TEAM"
+echo "Action: $MODE"
+if [[ "$MODE" == "--audit" ]]; then
+  python3 "$WORK/build100-preflight.py" \
+    --repo "$ROOT" --output "$WORK/diagnostics/mac-build101-preflight.json"
+  echo "Audit completed without building, registering app IDs, or altering device."
+  exit 0
+fi
+# For --build, validate again after assembling any missing Wine prefix.
+# Audit mode remains strictly read-only.
+
+# Xcode itself runs on macOS, but its build and packaged outputs use the
+# chosen storage volume. Default is the external APFS Repository volume.
+# A mounted external volume is essential: never accidentally write to an
+# internal /Volumes/Repository directory if the drive has been unplugged.
+if [[ "$DERIVED" == "$ARTIFACTS/"* || "$OUT" == "$ARTIFACTS/"* ]]; then
+  if ! mount | grep -F " on /Volumes/Repository (" >/dev/null; then
+    echo "External Repository disk is not mounted: /Volumes/Repository" >&2
+    echo "Refusing to create build outputs on the internal fallback path." >&2
+    exit 3
+  fi
+fi
+mkdir -p "$OUT" "$DERIVED"
+echo "=== Build101 destination volumes ==="
+echo "DerivedData: $DERIVED"
+echo "Build log and IPA: $OUT"
+df -h "$DERIVED" "$OUT"
+avail_kb="$(df -Pk "$DERIVED" | awk 'END {print $4}')"
+if [[ ! "$avail_kb" =~ ^[0-9]+$ ]] || (( avail_kb < 8 * 1024 * 1024 )); then
+  echo "Insufficient free disk on build volume (need >=8GiB before build): $DERIVED" >&2
+  echo "=== Disk status ===" >&2
+  df -h "$DERIVED" "$OUT" >&2
+  if [[ "$avail_kb" =~ ^[0-9]+$ ]]; then
+    awk -v kb="$avail_kb" 'BEGIN {
+      printf "Available on DerivedData volume: %.2f GiB; minimum: 8 GiB; recommended: 15+ GiB.\n", kb/1048576
+    }' >&2
+  fi
+  echo "For read-only storage diagnostics, run:" >&2
+  echo "  bash $WORK/build100-disk-audit-on-mac.sh" >&2
+  echo "No caches, snapshots, or existing build files were deleted." >&2
+  exit 3
+fi
+
+# Rebuild native NTDLL so the Build101 wine-bootstrap trace is linked.
+# Then build pinned ARM64/i386 Wine PE boot DLLs before packaging.
+echo "=== Build101 native Wine / PE bootstrap ==="
+# Preserve the previously working Build100 link inputs before replacing them.
+mkdir -p "$WORK/build101-artifacts/backup/native-static"
+for lib in libntdll_unix.a libwin32u_unix.a libwineserver.a; do
+  src="$ROOT/app/Madeira/$lib"
+  dest="$WORK/build101-artifacts/backup/native-static/$lib"
+  if [[ -s "$src" && ! -e "$dest" ]]; then cp -p "$src" "$dest"; fi
+done
+bash "$WORK/build100-wine-native-on-mac.sh" --native
+bash "$WORK/build101-wine-pe-on-mac.sh" --all
+for pe in aarch64-windows/ntdll.dll aarch64-windows/wow64.dll           aarch64-windows/wow64win.dll i386-windows/ntdll.dll           i386-windows/kernelbase.dll i386-windows/kernel32.dll           i386-windows/user32.dll; do
+  if [[ ! -s "$ROOT/app/Madeira/$pe" ]]; then
+    echo "Missing Wine PE runtime before Xcode: $pe" >&2
+    exit 4
+  fi
+done
+
+# The app requires an actual Wine registry/skeleton archive, never a dummy.
+# Build it from a fresh host wineboot inside the external SSD if absent.
+PREFIX="$ROOT/app/Madeira/prefix-template.tar.gz"
+if ! python3 "$WORK/build100-preflight.py" --verify-prefix "$PREFIX"; then
+  echo "=== Build101: rebuilding missing or INVALID Wine prefix template ==="
+  # Prefer the already-staged upstream WineHQ 11.0 package on external APFS.
+  # Do not install Homebrew's disabled cask or weaken Gatekeeper settings.
+  BUNDLED_WINE="$ARTIFACTS/toolchains/wine-stable-11.0_1/Wine Stable.app/Contents/Resources/wine/bin"
+  if [[ -z "${WINE:-}" && ! -x /opt/homebrew/bin/wine && -x "$BUNDLED_WINE/wine" ]]; then
+    export WINE="$BUNDLED_WINE/wine"
+    if [[ -z "${WINEBOOT:-}" ]]; then export WINEBOOT="$BUNDLED_WINE/wineboot"; fi
+  fi
+  if [[ -z "${WINEBOOT:-}" && ! -x /opt/homebrew/bin/wineboot && -x "$BUNDLED_WINE/wineboot" ]]; then
+    export WINEBOOT="$BUNDLED_WINE/wineboot"
+  fi
+  echo "Host Wine: ${WINE:-/opt/homebrew/bin/wine}"
+  echo "Host wineboot: ${WINEBOOT:-/opt/homebrew/bin/wineboot}"
+  # This vendor macOS Wine binary is x86_64 on Apple Silicon.
+  if [[ "${WINE:-}" == "$BUNDLED_WINE/wine" ]]; then
+    if ! arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
+      echo "Rosetta 2 is required to run bundled WineHQ x86_64 on Apple Silicon." >&2
+      echo "Install it manually if you approve: softwareupdate --install-rosetta --agree-to-license" >&2
+      echo "No system component has been installed automatically." >&2
+      exit 4
+    fi
+  fi
+  mkdir -p "$ARTIFACTS/tmp"
+  set +e
+  PREFIX_BUILD_TMP_BASE="$ARTIFACTS/tmp" \
+    bash "$ROOT/tools/build-prefix-snapshot.sh" 2>&1 | tee "$OUT/Build101-prefix-snapshot.log"
+  prefix_rc="${PIPESTATUS[0]}"
+  set -e
+  if [[ "$prefix_rc" -ne 0 ]] || ! python3 "$WORK/build100-preflight.py" --verify-prefix "$PREFIX"; then
+    echo "FAILED: a valid Wine prefix snapshot could not be generated." >&2
+    echo "See $OUT/Build101-prefix-snapshot.log; do not use an empty tarball." >&2
+    exit 4
+  fi
+fi
+sh "$ROOT/tools/check-prefix-template.sh" "$PREFIX"
+# Re-audit after prefix generation, before Xcode allocates compiler outputs.
+python3 "$WORK/build100-preflight.py" \
+  --repo "$ROOT" --no-discover --require-ready \
+  --output "$WORK/diagnostics/mac-build101-preflight.json"
+
+# 'Sign bundled dylibs' requires two current GPL/exceptions files under
+# app/Madeira/licenses; stage them from canonical project sources now so Xcode
+# copies the correct folder resources during this incremental build.
+bash "$ROOT/build/stage-licenses.sh"
+for pair in COPYING:LICENSE-MADEIRA-GPL-3.0.txt LICENSE-EXCEPTION.md:LICENSE-MADEIRA-EXCEPTION.txt; do
+  src="$ROOT/${pair%%:*}"
+  dst="$ROOT/app/Madeira/licenses/${pair##*:}"
+  if ! cmp -s "$src" "$dst"; then
+    echo "Build101 license staging failed for: ${pair##*:}" >&2
+    exit 4
+  fi
+done
+
+# iDeck control helper is built by the 'Bundle Wine Mono' Xcode phase. Xcode
+# does not infer this project-local cross toolchain from the login shell PATH.
+# Export a deterministic LLVM_MINGW path to all shell build phases (and also
+# pass it as a build setting below), without changing the global Mac PATH.
+if [[ -z "${LLVM_MINGW:-}" ]]; then
+  LLVM_MINGW="$ROOT/toolchains/llvm-mingw-20260421-ucrt-macos-universal"
+fi
+CONTROL_CC="$LLVM_MINGW/bin/x86_64-w64-mingw32-clang"
+if [[ ! -x "$CONTROL_CC" ]]; then
+  echo "Missing LLVM-MinGW x64 compiler: $CONTROL_CC" >&2
+  exit 4
+fi
+export LLVM_MINGW
+echo "Build101 x64 Windows helper compiler: $CONTROL_CC"
+
+# Automatic signing must create/use profiles for both <bundle> and
+# <bundle>.JITHelper; previous Personal Team rejected original app identifier.
+LOG="$OUT/Build101-xcodebuild.log"
+echo "Building Debug IPA (without SwiftUI preview dylibs). Xcode build log: $LOG"
+set +e
+xcodebuild \
+  -project "$ROOT/app/Madeira.xcodeproj" \
+  -scheme Madeira \
+  -configuration Debug \
+  -sdk iphoneos \
+  -destination "generic/platform=iOS" \
+  -derivedDataPath "$DERIVED" \
+  -jobs 2 \
+  -allowProvisioningUpdates \
+  LLVM_MINGW="$LLVM_MINGW" \
+  CODE_SIGN_STYLE=Automatic \
+  DEVELOPMENT_TEAM="$TEAM" \
+  MADEIRA_BUNDLE_IDENTIFIER="$BUNDLE" \
+  CURRENT_PROJECT_VERSION=101 \
+  MARKETING_VERSION=0.1.3 \
+  ENABLE_DEBUG_DYLIB=NO \
+  build 2>&1 | tee "$LOG"
+rc="${PIPESTATUS[0]}"
+set -e
+if [[ "$rc" -ne 0 ]]; then
+  echo "Xcode build FAILED (exit $rc). Read $LOG and fix the first build error."
+  exit "$rc"
+fi
+
+APP="$DERIVED/Build/Products/Debug-iphoneos/Madeira.app"
+HELPER="$APP/PlugIns/MadeiraJITHelper.appex"
+if [[ ! -d "$APP" || ! -d "$HELPER" ]]; then
+  echo "Xcode succeeded but the main app or JITHelper extension is missing."
+  exit 4
+fi
+INFO="/usr/libexec/PlistBuddy"
+main_id="$("$INFO" -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
+helper_id="$("$INFO" -c 'Print :CFBundleIdentifier' "$HELPER/Info.plist")"
+build_no="$("$INFO" -c 'Print :CFBundleVersion' "$APP/Info.plist")"
+if [[ "$main_id" != "$BUNDLE" || "$helper_id" != "$BUNDLE.JITHelper" || "$build_no" != "101" ]]; then
+  echo "Unexpected signed bundle or build number. NOT packaging."
+  printf 'main=%s helper=%s build=%s\n' "$main_id" "$helper_id" "$build_no"
+  exit 5
+fi
+codesign --verify --strict --verbose=2 "$APP"
+codesign --verify --strict --verbose=2 "$HELPER"
+
+STAGE="$(mktemp -d "$OUT/.stage.XXXXXXXX")"
+trap 'rm -rf "$STAGE"' EXIT
+mkdir -p "$STAGE/Payload"
+ditto "$APP" "$STAGE/Payload/Madeira.app"
+IPA="$OUT/iDeck-WoW64-Build101-Debug.ipa"
+(cd "$STAGE" && /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload "$IPA")
+if [[ ! -s "$IPA" ]]; then
+  echo "IPA packaging failed."
+  exit 6
+fi
+shasum -a 256 "$IPA" > "$IPA.sha256"
+echo "BUILD101 IPA CREATED: $IPA"
+echo "SHA256: $(cat "$IPA.sha256")"
+echo "No iPhone installation was attempted."

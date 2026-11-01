@@ -13,20 +13,57 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$REPO_ROOT/app/Madeira/prefix-template.tar.gz"
 
-WORK_DIR="$(mktemp -d /Users/"$USER"/madeira-prefix-build.XXXXXX)"
+BUILD_TMP_BASE="${PREFIX_BUILD_TMP_BASE:-/Users/$USER}"
+mkdir -p "$BUILD_TMP_BASE"
+WORK_DIR="$(mktemp -d "$BUILD_TMP_BASE/madeira-prefix-build.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 PREFIX="$WORK_DIR/prefix"
 
 WINE_BIN="${WINE:-/opt/homebrew/bin/wine}"
 WINEBOOT_BIN="${WINEBOOT:-/opt/homebrew/bin/wineboot}"
+WINESERVER_BIN="${WINESERVER:-$(dirname "$WINE_BIN")/wineserver}"
 
 if [[ ! -x "$WINE_BIN" ]]; then
     echo "error: wine not found at $WINE_BIN (override with WINE=...)" >&2
     exit 1
 fi
+if [[ ! -x "$WINEBOOT_BIN" ]]; then
+    echo "error: wineboot not found at $WINEBOOT_BIN (override with WINEBOOT=...)" >&2
+    exit 1
+fi
+if [[ ! -x "$WINESERVER_BIN" ]]; then
+    echo "error: wineserver not found at $WINESERVER_BIN (override with WINESERVER=...)" >&2
+    exit 1
+fi
 
 echo "==> Running wineboot --init in $PREFIX"
-WINEPREFIX="$PREFIX" WINEDEBUG=-all "$WINEBOOT_BIN" --init 2>&1 | tail -5 || true
+# Do not silently swallow an unsuccessful initialization (e.g. Rosetta,
+# Gatekeeper, missing macOS dylibs, or a failed Wine service).
+if ! WINEPREFIX="$PREFIX" WINEARCH=win64 WINEDEBUG=-all \
+    "$WINEBOOT_BIN" --init > "$WORK_DIR/wineboot.log" 2>&1; then
+    echo "error: wineboot failed; last diagnostics:" >&2
+    tail -60 "$WORK_DIR/wineboot.log" >&2
+    exit 1
+fi
+tail -8 "$WORK_DIR/wineboot.log" || true
+
+# wineboot may return before wineserver flushes registry files to disk.
+# Stop ONLY the fresh, isolated temporary prefix's server and wait for flush.
+echo "==> Flushing Wine registry through wineserver for this temporary prefix"
+WINEPREFIX="$PREFIX" "$WINESERVER_BIN" -k >> "$WORK_DIR/wineboot.log" 2>&1 || true
+if ! WINEPREFIX="$PREFIX" "$WINESERVER_BIN" -w >> "$WORK_DIR/wineboot.log" 2>&1; then
+    echo "error: wineserver did not shut down cleanly" >&2
+    tail -60 "$WORK_DIR/wineboot.log" >&2
+    exit 1
+fi
+for reg in system.reg user.reg userdef.reg; do
+    if [[ ! -s "$PREFIX/$reg" ]] || ! head -n 1 "$PREFIX/$reg" | grep -q '^WINE REGISTRY Version'; then
+        echo "error: missing or uninitialized $reg after wineserver flush" >&2
+        tail -60 "$WORK_DIR/wineboot.log" >&2
+        exit 1
+    fi
+done
+echo "PASS: all three Wine registry files flushed and initialized."
 
 if [[ ! -f "$PREFIX/.update-timestamp" ]]; then
     echo "error: wineboot did not produce .update-timestamp" >&2
@@ -40,6 +77,16 @@ BUILD_USER="$(id -un)"
 if [[ -d "$PREFIX/drive_c/users/$BUILD_USER" && "$BUILD_USER" != "madeira" ]]; then
     mv "$PREFIX/drive_c/users/$BUILD_USER" "$PREFIX/drive_c/users/madeira"
 fi
+# Fresh host wineboot may create symlinks from shell folders into /Users/...
+# Those links become broken after app installation, and the iOS extractor does
+# not restore symlink targets. Keep real directories in the portable template.
+for shell_folder in Desktop Documents Downloads Music Pictures Videos; do
+    user_dir="$PREFIX/drive_c/users/madeira/$shell_folder"
+    if [[ -L "$user_dir" ]]; then
+        rm "$user_dir"
+    fi
+    mkdir -p "$user_dir"
+done
 # Replace both literal `users\BUILD_USER` and any Z:\Users\BUILD_USER host paths.
 # The Z:-prefixed ones are host-side fonts Wine auto-registered; stripping the
 # whole line is safer than trying to remap — the iOS app ships no Mac fonts.
@@ -66,6 +113,9 @@ find "$PREFIX/drive_c" -type f \( \
 # NLS files are bundled separately in app/Madeira/nls/
 find "$PREFIX/drive_c/windows/system32" -maxdepth 1 -name "*.nls" -delete 2>/dev/null || true
 rm -rf "$PREFIX/drive_c/windows/globalization"
+# Do not include physical Mac host printer descriptions in the IPA.
+rm -rf "$PREFIX/drive_c/windows/system32/spool/drivers"
+mkdir -p "$PREFIX/drive_c/windows/system32/spool/drivers"
 
 # Heavy trees we don't need for Phase 3A (cmd.exe / single-exe games)
 rm -rf "$PREFIX/drive_c/windows/winsxs"
@@ -82,13 +132,35 @@ rm -rf "$PREFIX/drive_c/windows/syswow64"
 
 # dosdevices symlinks get recreated by the iOS app (z: -> / is wrong on iOS)
 rm -rf "$PREFIX/dosdevices"
+# The iOS tar extractor does not recreate symlinks. Remove any remaining
+# links from Wine's host layout to keep a portable registry+directory template.
+find "$PREFIX" -type l -delete
+# Discard AppleDouble / Finder metadata before creating the iOS bundle asset.
+find "$PREFIX" -type f \( -name '._*' -o -name '.DS_Store' \) -delete
 
 echo "==> Post-strip contents:"
 du -sh "$PREFIX"
 find "$PREFIX" -maxdepth 3 -type d | sort
 
-echo "==> Creating tarball: $OUTPUT"
-tar -C "$WORK_DIR" -czf "$OUTPUT" prefix
+echo "==> Creating tarball (with metadata disabled): $OUTPUT"
+# Keep the previous archive untouched unless the new one passes validation.
+ARCHIVE_TMP="$WORK_DIR/prefix-template.tar.gz"
+COPYFILE_DISABLE=1 tar -C "$WORK_DIR" -czf "$ARCHIVE_TMP" prefix
+sh "$REPO_ROOT/tools/check-prefix-template.sh" "$ARCHIVE_TMP"
+# Read the archive member table once: grep -q in a pipe can terminate tar
+# with SIGPIPE under 'set -o pipefail', yielding a false failure.
+tar -tzf "$ARCHIVE_TMP" > "$WORK_DIR/prefix-contents.txt"
+for member in system.reg user.reg userdef.reg .update-timestamp; do
+    if ! grep -Fqx "prefix/$member" "$WORK_DIR/prefix-contents.txt"; then
+        echo "error: $member missing from new Wine archive; preserving existing archive." >&2
+        exit 1
+    fi
+done
+if ! grep -Fqx 'prefix/drive_c/windows/system32/' "$WORK_DIR/prefix-contents.txt"; then
+    echo "error: system32 directory missing from new archive" >&2
+    exit 1
+fi
+mv -f "$ARCHIVE_TMP" "$OUTPUT"
 ls -lh "$OUTPUT"
 
 echo "==> Done."

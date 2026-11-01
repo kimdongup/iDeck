@@ -2992,6 +2992,7 @@ static ULONG_PTR get_image_address(void)
  *           start_main_thread
  */
 extern void ios_reserve_fex_arena(void);  /* ml756, virtual_ios.c */
+extern void ios_wow_va_census_log(const char *stage);
 
 static void start_main_thread(void)
 {
@@ -3152,6 +3153,7 @@ static void start_main_thread(void)
      * first PE placement. */
     WINE_IOS_LOG("ios_reserve_fex_arena...");
     ios_reserve_fex_arena();
+    ios_wow_va_census_log("post-fex-arena");
     /* ml997: the guest jumbo holdback runs AFTER the arena, never before.
      * rdr65 held 9216 MB at jit-pool-init and the arena then found nothing in 9
      * candidates ("ml774 NO ARENA RESERVED"), which cost FEX its private band
@@ -3162,14 +3164,24 @@ static void start_main_thread(void)
         ios_jumbo_holdback_init();
     }
 
+    /* File-backed milestones: os_log alone is not copied by devicectl
+     * Documents/madeira-log.txt. No filenames, credentials, or addresses. */
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=ntdll state=begin\n");
     WINE_IOS_LOG("load_ntdll...");
     load_ntdll();
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=ntdll state=ok\n");
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=wow64-ntdll state=begin\n");
     WINE_IOS_LOG("load_wow64_ntdll...");
     load_wow64_ntdll( main_image_info.Machine );
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=wow64-ntdll state=ok\n");
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=apiset state=begin\n");
     WINE_IOS_LOG("load_apiset_dll...");
     load_apiset_dll();
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=apiset state=ok\n");
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=server-init-done state=begin\n");
     WINE_IOS_LOG("server_init_process_done...");
     server_init_process_done();
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=server-init-done state=ok\n");
 }
 
 #ifdef __ANDROID__

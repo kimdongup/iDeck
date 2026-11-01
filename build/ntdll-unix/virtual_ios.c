@@ -22,6 +22,7 @@
 #pragma makedep unix
 #endif
 
+#include "../wow_va_probe.h"
 #include "config.h"
 #include "../madeira_cfg.h"   /* ml1095: one config file */
 #include <malloc/malloc.h>
@@ -10436,6 +10437,71 @@ static ULONG_PTR ios_wow_free_va( ULONG_PTR map_end )
     return free_bytes;
 }
 
+
+/* iDeck Steam diagnostic. Read-only: walk real kernel VM regions, recording
+ * both the TOTAL free VA and the aligned 4GB candidates inside the actual
+ * WoW64 candidate band. The old free-only gate can reject even when an
+ * aligned slot exists; an early placeholder may be impossible for either
+ * reason. No VM mapping, reservation, or policy change is made here. */
+static int ios_wow_va_next_region(void *unused, uint64_t query,
+                                   uint64_t *base, uint64_t *length)
+{
+    mach_vm_address_t addr = (mach_vm_address_t)query;
+    mach_vm_size_t size = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    kern_return_t kr;
+    (void)unused;
+
+    kr = mach_vm_region(mach_task_self(), &addr, &size,
+                        VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
+                        &cnt, &object);
+#ifdef __APPLE__
+    if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
+#endif
+    if (kr == KERN_INVALID_ADDRESS) return 0;
+    if (kr != KERN_SUCCESS) return -1;
+    *base = (uint64_t)addr;
+    *length = (uint64_t)size;
+    return 1;
+}
+
+void ios_wow_va_census_log(const char *stage)
+{
+    static unsigned child_reports;
+    ULONG_PTR map_end, floor, ceil;
+    struct wow_va_probe_stats stats;
+    const char *enabled = getenv("MADEIRA_WOW_VA_CENSUS");
+
+    if (!enabled || strcmp(enabled, "1")) return;
+    /* Booting Steam can start many pseudo-processes. Keep diagnostic VM walks
+     * bounded to the first eight children; other stages are each called once. */
+    if (stage && !strcmp(stage, "child-before-reserve") &&
+        __atomic_fetch_add(&child_reports, 1, __ATOMIC_RELAXED) >= 8) return;
+    map_end = ios_wow_map_end();
+    if (!map_end)
+    {
+        dprintf(2, "[wow-va] stage=%s map unavailable\n", stage);
+        return;
+    }
+    ios_wow_band(&floor, &ceil);
+    if (ceil > map_end) ceil = map_end;
+    stats = wow_va_probe_scan((uint64_t)map_end, (uint64_t)floor,
+                               (uint64_t)ceil, ios_wow_va_next_region, NULL);
+    dprintf(2, "[wow-va] stage=%s map_end=%p free_mb=%llu largest_mb=%llu "
+            "largest_at=%p band=[%p,%p) candidate=%p aligned_slots=%llu "
+            "regions=%llu complete=%d\n",
+            stage, (void *)map_end,
+            (unsigned long long)(stats.total_free >> 20),
+            (unsigned long long)(stats.largest_free >> 20),
+            (void *)(uintptr_t)stats.largest_at,
+            (void *)floor, (void *)ceil,
+            (void *)(uintptr_t)stats.first_aligned,
+            (unsigned long long)stats.aligned_slots,
+            (unsigned long long)stats.visited_regions, stats.complete);
+}
+
 /* SMALL-MAP RULE: may this session take (another) 4 GB window?
  *
  * A window is refused, cleanly and once-logged, when the map is smaller than
@@ -10921,6 +10987,73 @@ static void ios_wow_reserve_placeholders( unsigned max )
     pthread_mutex_unlock( &ios_wow_mutex );
 }
 
+
+/* The Swift app may hold one NO-ACCESS, 4GB-aligned window before it reserves
+ * the JIT pool. Its two globals are published only after the complete kernel
+ * mapping succeeds. No environment variable can spoof the ownership claim.
+ *
+ * The Wine window registry and reserved-area list are not initialized before
+ * virtual_init; import here only after mmap_init and the view tree exist.
+ * Crucially, do NOT unmap/remap this range at import: its purpose is to keep
+ * a 4GB hole permanently protected against Metal/FEX/framework allocations.
+ * Off unless the app explicitly requested a pre-JIT hold. */
+extern uint64_t madeira_wow_early_base;
+extern uint64_t madeira_wow_early_length;
+
+static int ios_wow_import_app_early_hold(void)
+{
+    ULONG_PTR base = (ULONG_PTR)madeira_wow_early_base;
+    ULONG_PTR length = (ULONG_PTR)madeira_wow_early_length;
+    ULONG_PTR floor, ceil, guard;
+    mach_vm_address_t addr;
+    mach_vm_size_t size = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    kern_return_t kr;
+
+    if (!base) return 0;
+    guard = ios_wow_guard_size();
+    ios_wow_band(&floor, &ceil);
+    if ((base & (IOS_WOW_WINDOW_SIZE - 1)) ||
+        base < floor || base > ceil ||
+        ceil - base < IOS_WOW_WINDOW_SIZE + guard ||
+        length != IOS_WOW_WINDOW_SIZE + guard ||
+        ios_wow_placeholder_count || ios_wow_window_count)
+    {
+        dprintf(2, "[wow-early] import REJECTED: invalid base=%p length=%p band=[%p,%p)\n",
+                (void *)base, (void *)length, (void *)floor, (void *)ceil);
+        return 0;
+    }
+
+    /* One whole PROT_NONE host VM region including the overrun guard. This
+     * independently validates that the app's reservation still exists and
+     * no intermediate caller split it or converted it to accessible memory. */
+    addr = (mach_vm_address_t)base;
+    kr = mach_vm_region(mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64,
+                        (vm_region_info_t)&info, &count, &object);
+#ifdef __APPLE__
+    if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
+#endif
+    if (kr != KERN_SUCCESS || addr != (mach_vm_address_t)base ||
+        size < length || info.protection != VM_PROT_NONE)
+    {
+        dprintf(2, "[wow-early] import REJECTED: held region missing/split/protected "
+                   "base=%p kr=%d got=%p size=%p\n",
+                (void *)base, (int)kr, (void *)(uintptr_t)addr, (void *)(uintptr_t)size);
+        return 0;
+    }
+    mmap_add_reserved_area((void *)base, length);
+    ios_wow_placeholders[0].base = base;
+    ios_wow_placeholders[0].guard_owned = 1;
+    ios_wow_placeholders[0].adopted = 0;
+    ios_wow_placeholder_count = 1;
+    dprintf(2, "[wow-early] imported pre-JIT 4GB+guard placeholder B=%p..%p "
+               "(no unmap, no second reserve)\n",
+            (void *)base, (void *)(base + IOS_WOW_WINDOW_SIZE));
+    return 1;
+}
+
 /***********************************************************************
  *           ios_wow_session_start
  *
@@ -10943,10 +11076,16 @@ static void ios_wow_session_start(void)
     unsigned want;
 
     if (ios_wow_env_ulong( "MADEIRA_WOW_PLACEHOLDERS", 0 ) == 1) want = IOS_WOW_MAX_WINDOWS;
+    else if (madeira_wow_early_base) want = 1;
     else if (ios_main_image_i386) want = 1;
     else return;
 
     ios_wow_session_arm();
+    ios_wow_va_census_log("placeholder-preflight");
+    /* An already-owned guest window was charged against free VA at the time
+     * of its original reservation; the old free-VA gate would now count it
+     * as occupied and wrongly refuse to adopt it. */
+    if (ios_wow_import_app_early_hold()) return;
     if (!ios_wow_map_allows_window()) return;
     ios_wow_reserve_placeholders( want );
 }
@@ -11099,6 +11238,7 @@ NTSTATUS ios_wow_window_reserve(void)
     unsigned i;
 
     ios_wow_session_arm();
+    ios_wow_va_census_log("child-before-reserve");
 
     /* give back what a previous 32-bit pseudo-process left behind first —
      * this is what makes launcher -> program work */
@@ -23400,6 +23540,8 @@ void virtual_init(void)
     if (size && mmap_is_in_reserved_area( (void*)0x10000, size ) == 1)
         anon_mmap_fixed( (void *)0x10000, size, PROT_READ | PROT_WRITE, 0 );
 
+    ios_wow_va_census_log("virtual-init-pre-holds");
+
     /* madeira-bcd: Social Club layout 2 holds its slots first and moves the
      * cage into chrome_elf's regular half (ios_sc2_boot_holds). */
     ios_sc2_boot_holds();
@@ -23419,7 +23561,9 @@ void virtual_init(void)
      * 32-bit main image was published or MADEIRA_WOW_PLACEHOLDERS=1 (see
      * ios_wow_session_start).  Last, after the holdback, whose first page
      * the lowest slot borrows as its guard. */
+    ios_wow_va_census_log("virtual-init-post-holds");
     ios_wow_session_start();
+    ios_wow_va_census_log("virtual-init-post-placeholder");
     {
         const char *e = getenv( "MADEIRA_WOW64_BY_TEB" );
         if (e && e[0] == '0') ios_wow64_by_teb = 0;

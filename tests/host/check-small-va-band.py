@@ -19,11 +19,13 @@ harness = r"""
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include "wow_va_probe.h"
 typedef uintptr_t ULONG_PTR;
 typedef int kern_return_t; typedef unsigned int mach_msg_type_number_t; typedef int task_t; typedef int *task_info_t;
 typedef uint64_t mach_vm_address_t, mach_vm_size_t; typedef int mach_port_t; typedef int *vm_region_info_t;
 typedef struct { int protection; } vm_region_basic_info_data_64_t;
 #define KERN_SUCCESS 0
+#define KERN_INVALID_ADDRESS 1
 #define TASK_VM_INFO 22
 #define TASK_VM_INFO_COUNT 1
 #define VM_REGION_BASIC_INFO_64 9
@@ -68,7 +70,7 @@ def run(exe, *args, env=None):
 with tempfile.TemporaryDirectory() as t:
     c = Path(t) / "band.c"; c.write_text(harness)
     exe = Path(t) / "band"
-    subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wno-unused-function", "-Wno-unused-variable", "-fsanitize=address,undefined", str(c), "-o", str(exe)], check=True)
+    subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wno-unused-function", "-Wno-unused-variable", "-fsanitize=address,undefined", "-I", str(root / "build"), str(c), "-o", str(exe)], check=True)
     got, err = run(exe, "0xfc0000000")
     assert got == ["400000000", "b00000000", "2", "1"], got
     assert "small address map" in err
