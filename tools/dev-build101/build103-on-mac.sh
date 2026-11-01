@@ -162,6 +162,10 @@ for name in sys.argv[2:]:
     print('PASS',name,'ARM64',len(b),'bytes')
 PY_DLL_CHECK
 
+# Follow static ARM64 PE imports recursively; build any further modules before IPA.
+python3 "$ROOT/tools/diagnostics/build-wine-pe-closure.py" \
+  --root "$ROOT" --arch aarch64-windows --jobs "${WINE_PE_JOBS:-2}"
+
 # Fail before Xcode if the observed runtime DLLs are absent or PE imports remain unresolved.
 python3 "$ROOT/tools/diagnostics/wine-pe-closure.py" \
   --root "$ROOT" --arch aarch64-windows \

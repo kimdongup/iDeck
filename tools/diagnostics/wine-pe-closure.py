@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 import struct
 
-SYSTEM = {'api-ms-win-core','api-ms-win-crt','ext-ms-win','kernel32.dll'}  # kernel32 checked if present; other API sets contracted
 def imports(path):
     b = path.read_bytes()
     def u16(o): return struct.unpack_from('<H',b,o)[0]
@@ -55,8 +54,8 @@ def audit(root, arch, targets):
     root=Path(root)
     stage=root/'app/Madeira'/arch
     build=root/'wine/build-bootstrap-pe/dlls'
-    available={p.name.lower():p for p in stage.glob('*.dll')}
-    lookup=lambda dll: build/dll.removesuffix('.dll')/arch/dll
+    available={p.name.lower():p for p in stage.iterdir() if p.is_file() and p.suffix.lower() in ('.dll','.drv','.exe')}
+    lookup=lambda dll: build/(dll if dll.endswith('.drv') else dll.rsplit('.',1)[0])/arch/dll
     visited=set(); missing={}; edges={}; mismatch={}
     todo=deque(targets or sorted(available))
     while todo:
