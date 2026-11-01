@@ -35,6 +35,8 @@ changes=[
   '#if (defined(__x86_64__) || defined(__i386__)) && !defined(__arm64ec__)\n/* On x86, Support old GCC'),
  ('#elif defined(__i386__) || defined(__x86_64__)\n    __asm__ __volatile__( "lock; xchgl',
   '#elif (defined(__i386__) || defined(__x86_64__)) && !defined(__arm64ec__)\n    __asm__ __volatile__( "lock; xchgl'),
+ ('#elif defined(__x86_64__)\n    __asm__ __volatile__( "lock; xchgq %0,(%1)"',
+  '#elif defined(__x86_64__) && !defined(__arm64ec__)\n    __asm__ __volatile__( "lock; xchgq %0,(%1)"'),
  ('#if defined(__x86_64__) || defined(__i386__)\n    for (;;) __asm__ __volatile__( "int $0x29"',
   '#if defined(__aarch64__) || defined(__arm64ec__)\n    register ULONG_PTR val __asm__("x0") = code;\n    for (;;) __asm__ __volatile__( "brk #0xf003" :: "r" (val) : "memory" );\n#elif defined(__x86_64__) || defined(__i386__)\n    for (;;) __asm__ __volatile__( "int $0x29"')
 ]
