@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT="${BUILD107_ROOT:-/Volumes/Repository/cokacremote/iDeckRuntimeLab/iDeck}"
 B="$ROOT/wine/build-bootstrap-arm64ec-fixed"
-SRC="$ROOT/wine-arm64ec-patched"
+SRC="$(dirname "$ROOT")/wine-arm64ec-patched"
 TC="$ROOT/toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin"
 export PATH="$TC:$PATH"
 [[ "$(uname -s)" == Darwin ]] || { echo "Run on Mac"; exit 2; }
