@@ -32,15 +32,20 @@ fi
 if ! grep -Eq '^arm64ec_CC = .+clang' "$B/Makefile"; then
     echo "ARM64EC compiler not configured; check $B/config.log"; exit 4
 fi
-make -C "$B" -j"${WINE_PE_JOBS:-2}" dlls/ntdll/arm64ec-windows/ntdll.dll
+make -C "$B" -j"${WINE_PE_JOBS:-2}" dlls/ntdll/aarch64-windows/ntdll.dll
 python3 - "$ROOT" "$B" <<'PY_PE'
 import pathlib,struct,sys,shutil
 root=pathlib.Path(sys.argv[1]); build=pathlib.Path(sys.argv[2])
-src=build/'dlls/ntdll/arm64ec-windows/ntdll.dll'
+src=build/'dlls/ntdll/aarch64-windows/ntdll.dll'
 b=src.read_bytes(); off=struct.unpack_from('<I',b,0x3c)[0]
 machine=struct.unpack_from('<H',b,off+4)[0]
-if b[:2]!=b'MZ' or b[off:off+4]!=b'PE\0\0' or machine!=0xa641:
-    raise SystemExit(f"Expected ARM64EC PE 0xA641, got {machine:04x}")
+if b[:2]!=b'MZ' or b[off:off+4]!=b'PE\0\0' or machine not in (0xaa64,0xa641):
+    raise SystemExit(f"Expected ARM64X/ARM64EC PE, got {machine:04x}")
+# Hybrid ARM64X PE is linked at the aarch64 target when arm64ec is enabled.
+# Ensure this is not accidentally a plain ARM64 build before staging it.
+makefile=(build/'Makefile').read_text()
+if 'PE_ARCHS =  aarch64 arm64ec i386' not in makefile:
+    raise SystemExit('Expected ARM64EC-enabled configuration')
 dst=root/'app/Madeira/arm64ec-windows/ntdll.dll'
 shutil.copy2(src,dst)
 print("PASS ARM64EC ntdll",len(b),"bytes ->",dst)
