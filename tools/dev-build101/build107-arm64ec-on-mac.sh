@@ -7,6 +7,20 @@ TC="$ROOT/toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin"
 export PATH="$TC:$PATH"
 [[ "$(uname -s)" == Darwin ]] || { echo "Run on Mac"; exit 2; }
 [[ -x "$TC/arm64ec-w64-mingw32-clang" ]] || { echo "Missing ARM64EC compiler"; exit 2; }
+# macOS /usr/bin/bison is often 2.3; Wine requires >=3.0.
+if command -v brew >/dev/null 2>&1; then
+  BISON_DIR="$(brew --prefix bison 2>/dev/null)/bin" || BISON_DIR=""
+  if [[ -n "$BISON_DIR" && -x "$BISON_DIR/bison" ]]; then
+    export PATH="$BISON_DIR:$PATH"
+  fi
+fi
+BISON_VERSION="$(bison --version 2>/dev/null | head -1 || true)"
+if ! bison --version 2>/dev/null | head -1 | awk '{split($NF,v,"."); exit !(v[1]+0>=3)}'; then
+  echo "Wine requires Bison >=3.0; found: ${BISON_VERSION:-none}" >&2
+  echo "Install with: brew install bison (script uses brew --prefix bison)" >&2
+  exit 3
+fi
+echo "Bison: $BISON_VERSION"
 [[ ! -f "$B/config.status" || -f "$B/Makefile" ]] || { echo "Incomplete ARM64EC configure"; exit 3; }
 if [[ ! -f "$B/Makefile" ]]; then
   mkdir -p "$B"
