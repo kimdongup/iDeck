@@ -52,8 +52,8 @@ python3 - "$SRC/tools/winegcc/winegcc.c" <<'PY_WINEGCC'
 from pathlib import Path
 import sys
 p=Path(sys.argv[1]); s=p.read_text()
-old='ret = strarray_fromstring( cc_cmd, " " );
-        if (target.platform == PLATFORM_WINDOWS) add_clang_options( target_name, &ret );'
+old="""ret = strarray_fromstring( cc_cmd, " " );
+        if (target.platform == PLATFORM_WINDOWS) add_clang_options( target_name, &ret );"""
 new='''if (target_name && !strncmp( target_name, "aarch64-", 8 ) &&
             strstr( cc_cmd, "arm64ec-w64-mingw32-clang" ))
         {
