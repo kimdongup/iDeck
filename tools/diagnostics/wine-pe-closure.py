@@ -33,6 +33,26 @@ def imports(path):
         if end<0: raise ValueError('unterminated DLL name')
         return b[o:end].decode('ascii','replace').lower()
     names=set()
+    # Export forwarders: EAT entries whose RVA points inside export directory.
+    # These represent runtime DLL dependencies invisible to PE import tables.
+    export_rva,export_len=struct.unpack_from('<II',b,dd)
+    if export_rva and export_len:
+        try:
+            eo=off(export_rva)
+            if eo+40<=len(b):
+                count=u32(eo+20); functions_rva=u32(eo+28)
+                funcs_off=off(functions_rva) if functions_rva else 0
+                for i in range(min(count,65536)):
+                    foff=funcs_off+i*4
+                    if not funcs_off or foff+4>len(b): break
+                    rva=u32(foff)
+                    if export_rva<=rva<export_rva+export_len:
+                        fwd=cstr(off(rva))
+                        dll=fwd.rsplit('.',1)[0]
+                        if dll:
+                            if not dll.endswith(('.dll','.drv','.exe')): dll+='.dll'
+                            names.add(dll)
+        except (IndexError,ValueError,struct.error): pass
     # import directory, delay import directory
     for directory,entry_size in ((1,20),(13,32)):
         rva,length=struct.unpack_from('<II',b,dd+directory*8)
