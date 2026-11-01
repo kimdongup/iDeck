@@ -109,6 +109,7 @@ def main():
     a.add_argument('--require-runtime',action='append',default=[],help='DLL observed in device dynamic LoadLibrary/search logs')
     a.add_argument('--json')
     a.add_argument('--strict',action='store_true')
+    a.add_argument('--allow-legacy16-forwarders',action='store_true',help='exclude kernel32 forwarders to 16-bit NE compatibility from PE gate')
     args=a.parse_args()
     report=audit(args.root,args.arch,args.target)
     stage=Path(args.root)/'app/Madeira'/args.arch
@@ -117,6 +118,9 @@ def main():
         if not name.endswith('.dll'): name+='.dll'
         if not (stage/name).is_file():
             report['missing'].setdefault(name, {'build_exists':(Path(args.root)/'wine/build-bootstrap-pe/dlls'/name[:-4]/args.arch/name).is_file(),'imported_by':['runtime-observed']})
+    if args.allow_legacy16_forwarders and args.arch=='i386-windows':
+        legacy={n:report['missing'].pop(n) for n in list(report['missing']) if n.endswith('.exe16.dll')}
+        if legacy: print('LEGACY16 FORWARDERS (not regular PE):',','.join(sorted(legacy)))
     print('PE dependency closure',args.arch,'scanned',report['scanned'])
     for name,info in sorted(report['missing'].items()):
         print('MISSING',name,'build_artifact='+str(info['build_exists']),'required_by='+','.join(info['imported_by'][:8]))

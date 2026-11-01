@@ -13,6 +13,7 @@ def main():
     ap.add_argument('--arch',default='aarch64-windows')
     ap.add_argument('--jobs',type=int,default=2)
     ap.add_argument('--max-rounds',type=int,default=12)
+    ap.add_argument('--allow-legacy16-forwarders',action='store_true')
     args=ap.parse_args()
     root=Path(args.root).resolve()
     stage=root/'app/Madeira'/args.arch
@@ -24,6 +25,9 @@ def main():
         report=mod.audit(root,args.arch,[])
         if report['invalid_or_wrong_arch']:
             raise SystemExit('Invalid PE architecture/format: '+repr(report['invalid_or_wrong_arch']))
+        if args.allow_legacy16_forwarders and args.arch=='i386-windows':
+            for name in list(report['missing']):
+                if name.endswith('.exe16.dll'): report['missing'].pop(name)
         missing=sorted(report['missing'])
         print('ROUND',round_no,'modules',report['scanned'],'missing',len(missing),flush=True)
         if not missing:
