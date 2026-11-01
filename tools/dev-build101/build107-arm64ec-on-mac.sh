@@ -2,7 +2,8 @@
 # Isolated ARM64EC Wine PE build; intentionally does not touch working bootstrap configuration.
 set -euo pipefail
 ROOT="${BUILD107_ROOT:-/Volumes/Repository/cokacremote/iDeckRuntimeLab/iDeck}"
-B="$ROOT/wine/build-bootstrap-arm64ec"
+B="$ROOT/wine/build-bootstrap-arm64ec-fixed"
+SRC="$ROOT/wine-arm64ec-patched"
 TC="$ROOT/toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin"
 export PATH="$TC:$PATH"
 [[ "$(uname -s)" == Darwin ]] || { echo "Run on Mac"; exit 2; }
@@ -21,10 +22,32 @@ if ! bison --version 2>/dev/null | head -1 | awk '{split($NF,v,"."); exit !(v[1]
   exit 3
 fi
 echo "Bison: $BISON_VERSION"
+# Prepare a detached, isolated source worktree. Never patch the pinned Wine submodule.
+if [[ ! -d "$SRC/.git" && ! -f "$SRC/.git" ]]; then
+  git -C "$ROOT/wine" worktree add --detach "$SRC" HEAD
+fi
+python3 - "$SRC/include/winnt.h" <<'PY_PATCH'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1]); s=p.read_text()
+changes=[
+ ('#if defined(__x86_64__) || defined(__i386__)\n/* On x86, Support old GCC',
+  '#if (defined(__x86_64__) || defined(__i386__)) && !defined(__arm64ec__)\n/* On x86, Support old GCC'),
+ ('#elif defined(__i386__) || defined(__x86_64__)\n    __asm__ __volatile__( "lock; xchgl',
+  '#elif (defined(__i386__) || defined(__x86_64__)) && !defined(__arm64ec__)\n    __asm__ __volatile__( "lock; xchgl'),
+ ('#if defined(__x86_64__) || defined(__i386__)\n    for (;;) __asm__ __volatile__( "int $0x29"',
+  '#if defined(__aarch64__) || defined(__arm64ec__)\n    register ULONG_PTR val __asm__("x0") = code;\n    for (;;) __asm__ __volatile__( "brk #0xf003" :: "r" (val) : "memory" );\n#elif defined(__x86_64__) || defined(__i386__)\n    for (;;) __asm__ __volatile__( "int $0x29"')
+]
+for old,new in changes:
+    if old in s: s=s.replace(old,new,1)
+    elif new not in s: raise SystemExit("Unexpected winnt.h layout: "+old[:60])
+p.write_text(s)
+print("ARM64EC header compatibility applied in detached worktree")
+PY_PATCH
 [[ ! -f "$B/config.status" || -f "$B/Makefile" ]] || { echo "Incomplete ARM64EC configure"; exit 3; }
 if [[ ! -f "$B/Makefile" ]]; then
   mkdir -p "$B"
-  ( cd "$B" && "$ROOT/wine/configure" \
+  ( cd "$B" && "$SRC/configure" \
     --enable-archs=aarch64,arm64ec,i386 --with-mingw=llvm-mingw \
     --without-x --without-vulkan --without-freetype --without-gnutls \
     --disable-tests --enable-winegstreamer )
