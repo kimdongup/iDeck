@@ -3355,8 +3355,9 @@ NTSTATUS WINAPI NtTerminateProcess( HANDLE handle, LONG exit_code )
     if ((unsigned int)exit_code == 0xc0000135u)
     {
         TEB *teb = NtCurrentTeb();
-        dprintf( 2, "[build108-first-dll-not-found] peb=%p teb=%p handle=%p exit=0x%08x\n",
-                 teb ? teb->Peb : NULL, teb, handle, (unsigned int)exit_code );
+        void *caller = __builtin_extract_return_addr( __builtin_return_address(0) );
+        dprintf( 2, "[build108-first-dll-not-found] peb=%p teb=%p handle=%p exit=0x%08x caller=%p\n",
+                 teb ? teb->Peb : NULL, teb, handle, (unsigned int)exit_code, caller );
     }
     if ((unsigned int)exit_code == 0xE0000008u && handle == NtCurrentProcess())
         ios_term_oom_record( NtCurrentTeb() );
