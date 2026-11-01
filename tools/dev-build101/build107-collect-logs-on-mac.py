@@ -36,7 +36,12 @@ def main():
         if not name.startswith("madeira-log"):continue
         matches=[REDACT.sub("[path/id]",line.strip()) for line in dest.read_text(errors="replace").splitlines() if FILTER.search(line)]
         print("  diagnostic matches:",len(matches))
-        for line in matches[-45:]: print(" ",line[:320])
+        critical=re.compile(r"ec-child-ntdll|load_child_ec_ntdll|BOOT FAILED|child-boot-fail|failed to load|missing.*dll|STATUS_DLL_NOT_FOUND|c0000135|import.*fail|module.*not found",re.I)
+        critical_lines=[REDACT.sub("[path/id]",line.strip()) for line in dest.read_text(errors="replace").splitlines() if critical.search(line)]
+        print("  critical lines:",len(critical_lines))
+        for line in critical_lines[:90]: print("  CRITICAL",line[:360])
+        print("  final chronological events:")
+        for line in matches[-20:]: print(" ",line[:320])
     print("Local files:",base)
     if found==0: print("No files could be read; device container log location needs investigation.")
 
