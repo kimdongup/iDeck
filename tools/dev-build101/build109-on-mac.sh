@@ -113,6 +113,31 @@ else
 fi
 bash "$ROOT/tools/dev-build101/build100-wine-native-on-mac.sh" --native
 bash "$ROOT/tools/dev-build101/build101-wine-pe-on-mac.sh" --all
+# Build101 deliberately preserves an existing valid PE, even when newly
+# instrumented Wine source was compiled. Build109 must explicitly stage its
+# freshly linked NTDLL or the logs will silently remain those of Build108.
+python3 - "$ROOT" "$WORK/build109-artifacts/backup" <<'PY_NTDLL_STAGE'
+from pathlib import Path
+import shutil, struct, sys
+root, backup = Path(sys.argv[1]), Path(sys.argv[2])
+marker = b"[build109-pe-loader]"
+for arch, machine in (("aarch64-windows", 0xaa64), ("i386-windows", 0x014c)):
+    src = root / "wine/build-bootstrap-pe/dlls/ntdll" / arch / "ntdll.dll"
+    dst = root / "app/Madeira" / arch / "ntdll.dll"
+    data = src.read_bytes()
+    pe_off = struct.unpack_from("<I", data, 0x3c)[0]
+    if data[:2] != b"MZ" or data[pe_off:pe_off+4] != b"PE\0\0":
+        raise SystemExit(f"Build109 invalid PE: {src}")
+    if struct.unpack_from("<H", data, pe_off+4)[0] != machine or marker not in data:
+        raise SystemExit(f"Build109 wrong architecture or missing loader trace: {src}")
+    if dst.exists() and dst.read_bytes() != data:
+        old = backup / arch / "ntdll.dll.before-build109"
+        old.parent.mkdir(parents=True, exist_ok=True)
+        if not old.exists(): shutil.copy2(dst, old)
+    shutil.copy2(src, dst)
+    if marker not in dst.read_bytes(): raise SystemExit(f"Build109 stage verify failed: {dst}")
+    print(f"PASS Build109 PE trace staged {arch}: {dst}")
+PY_NTDLL_STAGE
 for pe in aarch64-windows/ntdll.dll aarch64-windows/wow64.dll           aarch64-windows/wow64win.dll i386-windows/ntdll.dll           i386-windows/kernelbase.dll i386-windows/kernel32.dll           i386-windows/user32.dll; do
   if [[ ! -s "$ROOT/app/Madeira/$pe" ]]; then
     echo "Missing Wine PE runtime before Xcode: $pe" >&2
@@ -338,6 +363,17 @@ if [[ "$main_id" != "$BUNDLE" || "$helper_id" != "$BUNDLE.JITHelper" || "$build_
   printf 'main=%s helper=%s build=%s\n' "$main_id" "$helper_id" "$build_no"
   exit 5
 fi
+# Fail closed if Xcode copied stale NTDLL folder resources.
+python3 - "$APP" <<'PY_APP_NTDLL'
+from pathlib import Path
+import sys
+app = Path(sys.argv[1])
+for arch in ("aarch64-windows", "i386-windows"):
+    dll = app / arch / "ntdll.dll"
+    if not dll.is_file() or b"[build109-pe-loader]" not in dll.read_bytes():
+        raise SystemExit(f"Build109 stale or missing traced NTDLL inside signed app: {dll}")
+    print(f"PASS Build109 bundled PE trace: {arch}")
+PY_APP_NTDLL
 # Verify that the staged app really contains the intended ARM64X payload.
 python3 "$ROOT/tools/dev-build101/verify-build107-arm64x.py" \
   "$APP/arm64ec-windows/ntdll.dll"
