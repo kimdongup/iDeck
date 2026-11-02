@@ -2000,29 +2000,41 @@ static void *ios_mach_exception_thread( void *arg )
                     dprintf(STDERR_FILENO,
                             "[int3-guest] guest_rip=0x%llx x28=0x%llx read=%d rev=ml554\n",
                             (unsigned long long)grip, (unsigned long long)x28v, ok);
-                    /* Build115: read-only CEF i386 chrome_elf.dll INT3 probe.
-                     * The logged guest RIP is mapped at chrome_elf+0x3a044
-                     * in multiple launches. An inaccessible guest address is
-                     * explicitly reported; never relax protection or skip BRK. */
+                    /* Build116: translate 32-bit guest RIP via the faulting
+                     * thread's owning PEB WoW window. Direct host reads of
+                     * 0x731ea044 fail because guest i386 address != host VA.
+                     * Diagnostic-only: no policy or register modifications. */
                     if (ok && (grip == 0x731ea044ULL || grip == 0x68f4a044ULL))
                     {
+                        uintptr_t ft = 0;
+                        void *tr = NULL, *peb = NULL;
+                        ULONG_PTR wb = 0;
+                        mach_vm_size_t got_peb = 0;
                         unsigned char bytes[32] = {0};
                         mach_vm_size_t got_code = 0;
-                        kern_return_t read_status = mach_vm_read_overwrite(
-                            mach_task_self(), (mach_vm_address_t)(grip - 16),
-                            sizeof(bytes), (mach_vm_address_t)bytes, &got_code);
+                        kern_return_t read_status = KERN_INVALID_ADDRESS;
+                        ios_lookup_thread(thread, &ft, &tr);
+                        if (ft && mach_vm_read_overwrite(mach_task_self(),
+                            ft + offsetof(TEB, Peb), sizeof(peb),
+                            (mach_vm_address_t)&peb, &got_peb) == KERN_SUCCESS &&
+                            got_peb == sizeof(peb))
+                            wb = ios_wow_base_for_peb(peb);
+                        if (wb)
+                            read_status = mach_vm_read_overwrite(
+                                mach_task_self(), (mach_vm_address_t)(wb + grip - 16),
+                                sizeof(bytes), (mach_vm_address_t)bytes, &got_code);
                         dprintf(STDERR_FILENO,
-                                "[build115-cef-brk] guest_rip=0x%llx chrome_elf_rva=0x3a044 "
-                                "read_kr=%d bytes=%llu rsp=0x%llx rdx=0x%llx r8=0x%llx\n",
-                                (unsigned long long)grip, (int)read_status,
-                                (unsigned long long)got_code,
+                                "[build116-cef-brk] guest_rip=0x%llx chrome_elf_rva=0x3a044 "
+                                "window=0x%llx read_kr=%d bytes=%llu rsp=0x%llx rdx=0x%llx r8=0x%llx\n",
+                                (unsigned long long)grip, (unsigned long long)wb,
+                                (int)read_status, (unsigned long long)got_code,
                                 (unsigned long long)gregs[4],
                                 (unsigned long long)gregs[2],
                                 (unsigned long long)gregs[8]);
                         if (read_status == KERN_SUCCESS && got_code == sizeof(bytes))
                         {
                             int j;
-                            dprintf(STDERR_FILENO, "[build115-cef-brk] code[-16:+15]=");
+                            dprintf(STDERR_FILENO, "[build116-cef-brk] code[-16:+15]=");
                             for (j = 0; j < (int)sizeof(bytes); ++j)
                                 dprintf(STDERR_FILENO, "%02x", bytes[j]);
                             dprintf(STDERR_FILENO, "\n");
