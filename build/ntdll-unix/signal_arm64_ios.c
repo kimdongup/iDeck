@@ -2055,6 +2055,85 @@ static void *ios_mach_exception_thread( void *arg )
                                     fk == KERN_SUCCESS && nf == sizeof(frame) ? frame[1] : 0,
                                     sk == KERN_SUCCESS && ns == sizeof(candidate) ? candidate[0] : 0);
                         }
+                        /* Build118: log only executable code around the caller
+                         * and preceding conditional branch plus a bounded EBP
+                         * return-address chain. All reads use the faulting WoW
+                         * process window, and no registers/mappings are changed.
+                         * 0x3a044 and 0x39b35 are ASLR-invariant RVAs confirmed
+                         * in Build117. 0x39fff is the target of jne rel8 0xc2
+                         * immediately before the INT3/UD2 sequence. */
+                        if (wb)
+                        {
+                            unsigned int module_base = (unsigned int)(grip - 0x3a044ULL);
+                            struct {
+                                const char *label;
+                                unsigned int rva;
+                                unsigned int back;
+                                unsigned int len;
+                            } probes[] = {
+                                {"caller-return", 0x39b35U, 32U, 64U},
+                                {"branch-target", 0x39fffU, 32U, 64U},
+                            };
+                            unsigned pi;
+                            for (pi=0; pi < sizeof(probes)/sizeof(probes[0]); ++pi)
+                            {
+                                unsigned char cb[64] = {0};
+                                mach_vm_size_t nc = 0;
+                                unsigned int guest_addr = module_base + probes[pi].rva - probes[pi].back;
+                                kern_return_t ck = mach_vm_read_overwrite(
+                                    mach_task_self(), (mach_vm_address_t)(wb + guest_addr),
+                                    probes[pi].len, (mach_vm_address_t)cb, &nc);
+                                dprintf(STDERR_FILENO,
+                                        "[build118-cef-code] %s base=0x%x rva=0x%x "
+                                        "start_rva=0x%x kr=%d bytes=%llu\n",
+                                        probes[pi].label, module_base, probes[pi].rva,
+                                        probes[pi].rva - probes[pi].back, (int)ck,
+                                        (unsigned long long)nc);
+                                if (ck == KERN_SUCCESS && nc == probes[pi].len)
+                                {
+                                    unsigned bi;
+                                    dprintf(STDERR_FILENO, "[build118-cef-code] %s hex=",
+                                            probes[pi].label);
+                                    for (bi=0; bi < nc; ++bi)
+                                        dprintf(STDERR_FILENO, "%02x", cb[bi]);
+                                    dprintf(STDERR_FILENO, "\n");
+                                }
+                            }
+                            {
+                                unsigned int frame_ptr = (unsigned int)gregs[5];
+                                unsigned depth;
+                                for (depth=0; depth < 8; ++depth)
+                                {
+                                    unsigned int pair[2] = {0, 0};
+                                    mach_vm_size_t nr = 0;
+                                    kern_return_t fk;
+                                    if (frame_ptr < 0x10000U || frame_ptr > 0xfffffff0U)
+                                        break;
+                                    fk = mach_vm_read_overwrite(mach_task_self(),
+                                        (mach_vm_address_t)(wb + frame_ptr), sizeof(pair),
+                                        (mach_vm_address_t)pair, &nr);
+                                    if (fk != KERN_SUCCESS || nr != sizeof(pair))
+                                    {
+                                        dprintf(STDERR_FILENO,
+                                                "[build118-cef-stack] depth=%u frame=0x%x kr=%d\n",
+                                                depth, frame_ptr, (int)fk);
+                                        break;
+                                    }
+                                    dprintf(STDERR_FILENO,
+                                            "[build118-cef-stack] depth=%u frame=0x%x next=0x%x "
+                                            "ret=0x%x chrome_elf_rva=%s0x%x\n",
+                                            depth, frame_ptr, pair[0], pair[1],
+                                            (pair[1] >= module_base &&
+                                             pair[1] - module_base < 0x200000U) ? "" : "not-in-module:",
+                                            (pair[1] >= module_base &&
+                                             pair[1] - module_base < 0x200000U) ?
+                                                pair[1] - module_base : 0);
+                                    if (pair[0] <= frame_ptr || pair[0] - frame_ptr > 0x100000U)
+                                        break;
+                                    frame_ptr = pair[0];
+                                }
+                            }
+                        }
                         if (read_status == KERN_SUCCESS && got_code == sizeof(bytes))
                         {
                             int j;
