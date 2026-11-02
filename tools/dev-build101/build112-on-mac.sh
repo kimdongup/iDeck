@@ -405,7 +405,7 @@ INFO="/usr/libexec/PlistBuddy"
 main_id="$("$INFO" -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
 helper_id="$("$INFO" -c 'Print :CFBundleIdentifier' "$HELPER/Info.plist")"
 build_no="$("$INFO" -c 'Print :CFBundleVersion' "$APP/Info.plist")"
-if [[ "$main_id" != "$BUNDLE" || "$helper_id" != "$BUNDLE.JITHelper" || "$build_no" != "111" ]]; then
+if [[ "$main_id" != "$BUNDLE" || "$helper_id" != "$BUNDLE.JITHelper" || "$build_no" != "112" ]]; then
   echo "Unexpected signed bundle or build number. NOT packaging."
   printf 'main=%s helper=%s build=%s\n' "$main_id" "$helper_id" "$build_no"
   exit 5
