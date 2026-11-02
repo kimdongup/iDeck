@@ -89,6 +89,27 @@ if [[ ! "$avail_kb" =~ ^[0-9]+$ ]] || (( avail_kb < 8 * 1024 * 1024 )); then
   exit 3
 fi
 
+# The Wine bootstrap Makefile invokes llvm-mingw by bare executable name
+# (i686-w64-mingw32-clang), including when an incremental target needs
+# recompilation. Export the pinned compiler *before every Wine make call*.
+# Build101's toolchain PATH is scoped to its own subprocess and does not
+# survive back into this script.
+WINE_MINGW_BIN="$ROOT/toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin"
+for tool in i686-w64-mingw32-clang aarch64-w64-mingw32-clang; do
+  if [[ ! -x "$WINE_MINGW_BIN/$tool" ]]; then
+    echo "Build122 missing pinned cross compiler: $WINE_MINGW_BIN/$tool" >&2
+    exit 4
+  fi
+done
+export PATH="$WINE_MINGW_BIN:$PATH"
+for tool in i686-w64-mingw32-clang aarch64-w64-mingw32-clang; do
+  if [[ "$(command -v "$tool")" != "$WINE_MINGW_BIN/$tool" ]]; then
+    echo "Build122 cannot resolve pinned cross compiler: $tool" >&2
+    exit 4
+  fi
+done
+echo "Build122 pinned llvm-mingw ready: $WINE_MINGW_BIN"
+
 # Rebuild native NTDLL so the Build122 wine-bootstrap trace is linked.
 # Then build pinned ARM64/i386 Wine PE boot DLLs before packaging.
 echo "=== Build122 native Wine / PE bootstrap ==="
@@ -308,7 +329,6 @@ for pe in aarch64-windows/kernel32.dll aarch64-windows/kernelbase.dll; do
 done
 
 # Build122 ARM64 DLL closure (observed missing in Build102 runtime).
-export PATH="$ROOT/toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin:$PATH"
 DLLS=(rpcrt4 user32 gdi32 advapi32 ucrtbase)
 TARGETS=()
 for dll in "${DLLS[@]}"; do TARGETS+=("dlls/$dll/aarch64-windows/$dll.dll"); done
