@@ -2202,6 +2202,74 @@ static void *ios_mach_exception_thread( void *arg )
                                         (int)sk, print);
                             }
                         }
+                        /* Build120: INT3 at chrome_elf+0x3a043 follows
+                         * test eax,eax; je from +0x3a022, immediately after
+                         * DLL-handle API via IAT+0xdaf24. Previous probe
+                         * read +0xda124 in error, and interpreted the wide
+                         * DLL literal as ANSI. No exception policy changes. */
+                        if (wb)
+                        {
+                            unsigned int base = (unsigned int)(grip - 0x3a044ULL);
+                            struct { const char *label; unsigned int rva; } slots[] = {
+                                {"dll-handle-api", 0xdaf24U},
+                                {"resolve-symbol-api", 0xdaea0U},
+                                {"pre-call-api", 0xda1f4U},
+                                {"cached-symbol", 0x10b17cU}
+                            };
+                            unsigned i;
+                            for (i=0; i<sizeof(slots)/sizeof(slots[0]); ++i)
+                            {
+                                unsigned int value = 0;
+                                mach_vm_size_t nr = 0;
+                                kern_return_t kr = mach_vm_read_overwrite(
+                                    mach_task_self(),
+                                    (mach_vm_address_t)(wb + base + slots[i].rva),
+                                    sizeof(value), (mach_vm_address_t)&value, &nr);
+                                dprintf(STDERR_FILENO,
+                                        "[build120-cef-iat] %s rva=0x%x kr=%d value=0x%x\n",
+                                        slots[i].label, slots[i].rva, (int)kr,
+                                        kr == KERN_SUCCESS && nr == sizeof(value) ? value : 0);
+                            }
+                            {
+                                unsigned char literal[80] = {0};
+                                char printed[41] = {0};
+                                mach_vm_size_t nr = 0;
+                                kern_return_t kr = mach_vm_read_overwrite(
+                                    mach_task_self(), (mach_vm_address_t)(wb + base + 0xd65ceU),
+                                    sizeof(literal), (mach_vm_address_t)literal, &nr);
+                                if (kr == KERN_SUCCESS && nr == sizeof(literal))
+                                {
+                                    unsigned i;
+                                    for (i=0; i < 39; ++i)
+                                    {
+                                        unsigned char lo = literal[i*2], hi=literal[i*2+1];
+                                        if (!lo && !hi) break;
+                                        printed[i] = hi ? '?' : (lo >= 32 && lo <= 126 ? (char)lo : '?');
+                                    }
+                                }
+                                dprintf(STDERR_FILENO,
+                                        "[build120-cef-dll] dll_rva=0xd65ce encoding=UTF16LE kr=%d text=\"%s\"\n",
+                                        (int)kr, printed);
+                            }
+                            {
+                                unsigned char literal[64] = {0};
+                                char printed[65] = {0};
+                                mach_vm_size_t nr = 0;
+                                kern_return_t kr = mach_vm_read_overwrite(
+                                    mach_task_self(), (mach_vm_address_t)(wb + base + 0xd65f8U),
+                                    sizeof(literal), (mach_vm_address_t)literal, &nr);
+                                if (kr == KERN_SUCCESS && nr == sizeof(literal))
+                                {
+                                    unsigned i;
+                                    for (i=0; i < sizeof(literal)-1 && literal[i]; ++i)
+                                        printed[i] = literal[i] >= 32 && literal[i] <= 126 ?
+                                            (char)literal[i] : '?';
+                                }
+                                dprintf(STDERR_FILENO,
+                                        "[build120-cef-symbol] symbol_rva=0xd65f8 encoding=ANSI kr=%d text=\"%s\"\n",
+                                        (int)kr, printed);
+                            }
+                        }
                         if (read_status == KERN_SUCCESS && got_code == sizeof(bytes))
                         {
                             int j;
