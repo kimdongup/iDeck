@@ -2279,6 +2279,121 @@ static void *ios_mach_exception_thread( void *arg )
                             dprintf(STDERR_FILENO, "\n");
                         }
                     }
+                    /* Build121: libcef 32-bit INT3 probe. Build120 logged a
+                     * remote EXCEPTION_RECORD at 0x6e0e6732 and immediately
+                     * afterward FEX guest RIP at 0x6e0e6733 (post-INT3).
+                     * Log the *faulting thread* PEB/WoW window to distinguish
+                     * 0x72... and 0x73... libcef mappings; never guess by
+                     * matching section logs from another process. Read only,
+                     * no instruction skipping or exception suppression. */
+                    if (ok && grip == 0x6e0e6733ULL)
+                    {
+                        uintptr_t ft=0;
+                        void *tr=NULL, *peb=NULL;
+                        mach_vm_size_t np=0;
+                        ULONG_PTR wb=0;
+                        kern_return_t pk=KERN_INVALID_ADDRESS;
+                        const unsigned int guest_libcef_base=0x694b0000U;
+                        const unsigned int fault_guest_pc=(unsigned int)(grip-1);
+                        unsigned char code[96]={0};
+                        unsigned char dos[64]={0}, nt[96]={0};
+                        mach_vm_size_t nc=0,nmz=0,nnt=0;
+                        unsigned int pe_offset=0, image_size=0;
+                        int pe_verified=0;
+                        kern_return_t ck=KERN_INVALID_ADDRESS,mk=KERN_INVALID_ADDRESS;
+                        ios_lookup_thread(thread,&ft,&tr);
+                        if (ft)
+                            pk=mach_vm_read_overwrite(mach_task_self(),
+                                (mach_vm_address_t)(ft+offsetof(TEB,Peb)),
+                                sizeof(peb),(mach_vm_address_t)&peb,&np);
+                        if (pk == KERN_SUCCESS && np == sizeof(peb))
+                            wb=ios_wow_base_for_peb(peb);
+                        if (wb)
+                        {
+                            ck=mach_vm_read_overwrite(mach_task_self(),
+                                (mach_vm_address_t)(wb+fault_guest_pc-48U),
+                                sizeof(code),(mach_vm_address_t)code,&nc);
+                            mk=mach_vm_read_overwrite(mach_task_self(),
+                                (mach_vm_address_t)(wb+guest_libcef_base),
+                                sizeof(dos),(mach_vm_address_t)dos,&nmz);
+                            if (mk == KERN_SUCCESS && nmz == sizeof(dos) &&
+                                dos[0] == 'M' && dos[1] == 'Z')
+                            {
+                                pe_offset=(unsigned int)dos[0x3c] |
+                                    ((unsigned int)dos[0x3d] << 8) |
+                                    ((unsigned int)dos[0x3e] << 16) |
+                                    ((unsigned int)dos[0x3f] << 24);
+                                if (pe_offset >= 0x40U && pe_offset <= 0x1000U &&
+                                    mach_vm_read_overwrite(mach_task_self(),
+                                        (mach_vm_address_t)(wb+guest_libcef_base+pe_offset),
+                                        sizeof(nt),(mach_vm_address_t)nt,&nnt)==KERN_SUCCESS &&
+                                    nnt==sizeof(nt) && nt[0]=='P' && nt[1]=='E' &&
+                                    !nt[2] && !nt[3] && nt[4]==0x4c && nt[5]==0x01)
+                                {
+                                    image_size=(unsigned int)nt[0x50] |
+                                        ((unsigned int)nt[0x51] << 8) |
+                                        ((unsigned int)nt[0x52] << 16) |
+                                        ((unsigned int)nt[0x53] << 24);
+                                    pe_verified=image_size > fault_guest_pc-guest_libcef_base &&
+                                        image_size < 0x10000000U;
+                                }
+                            }
+                        }
+                        dprintf(STDERR_FILENO,
+                                "[build121-libcef] guest_pc=0x%x guest_rip=0x%llx "
+                                "peb=%p teb=0x%llx wow=0x%llx "
+                                "fault_host=0x%llx code_kr=%d code_bytes=%llu "
+                                "pe_header_kr=%d pe_verified=%d image_size=0x%x "
+                                "candidate_libcef_rva=0x%x\n",
+                                fault_guest_pc,(unsigned long long)grip,peb,
+                                (unsigned long long)ft,(unsigned long long)wb,
+                                (unsigned long long)(wb+fault_guest_pc),
+                                (int)ck,(unsigned long long)nc,(int)mk,
+                                pe_verified,image_size,fault_guest_pc-guest_libcef_base);
+                        if (ck == KERN_SUCCESS && nc == sizeof(code))
+                        {
+                            unsigned i;
+                            dprintf(STDERR_FILENO,
+                                    "[build121-libcef] code[-48:+47]=");
+                            for (i=0; i<sizeof(code); i++)
+                                dprintf(STDERR_FILENO,"%02x",code[i]);
+                            dprintf(STDERR_FILENO,"\n");
+                        }
+                        if (wb)
+                        {
+                            unsigned int frame=(unsigned int)gregs[5];
+                            unsigned i;
+                            for (i=0; i<10 && frame>=0x10000U &&
+                                 frame<=0xfffffff7U; i++)
+                            {
+                                unsigned int pair[2]={0,0};
+                                mach_vm_size_t nf=0;
+                                kern_return_t fk=mach_vm_read_overwrite(
+                                    mach_task_self(),(mach_vm_address_t)(wb+frame),
+                                    sizeof(pair),(mach_vm_address_t)pair,&nf);
+                                if (fk != KERN_SUCCESS || nf != sizeof(pair))
+                                {
+                                    dprintf(STDERR_FILENO,
+                                            "[build121-libcef-stack] depth=%u frame=0x%x kr=%d\n",
+                                            i,frame,(int)fk);
+                                    break;
+                                }
+                                dprintf(STDERR_FILENO,
+                                        "[build121-libcef-stack] depth=%u frame=0x%x "
+                                        "next=0x%x return=0x%x libcef_rva=%s0x%x\n",
+                                        i,frame,pair[0],pair[1],
+                                        pe_verified && pair[1]>=guest_libcef_base &&
+                                        pair[1]-guest_libcef_base<image_size ?
+                                            "" : "not-in-verified-libcef:",
+                                        pe_verified && pair[1]>=guest_libcef_base &&
+                                        pair[1]-guest_libcef_base<image_size ?
+                                            pair[1]-guest_libcef_base : 0);
+                                if (pair[0]<=frame || pair[0]-frame>0x100000U)
+                                    break;
+                                frame=pair[0];
+                            }
+                        }
+                    }
                     if (ok)
                     {
                         /* ml578: the GUEST register file — 16 entries, FEX order.
