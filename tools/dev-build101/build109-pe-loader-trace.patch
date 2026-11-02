@@ -1,13 +1,5 @@
 --- a/dlls/ntdll/loader.c
 +++ b/dlls/ntdll/loader.c
-@@ -5476,6 +5476,7 @@
-         GET_PTR( Wow64LdrpInitialize );
-         GET_PTR( Wow64PrepareForException );
- #undef GET_PTR
-+        MESSAGE( "[build109-pe-loader] stage=fixup_imports ok peb=%p\n", NtCurrentTeb()->Peb );
-         imports_fixup_done = TRUE;
-     }
- 
 @@ -5757,11 +5758,13 @@
          ERR( "loader_init: update_load_config done, proceeding to load kernel32\n" );
  #endif
