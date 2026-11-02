@@ -2000,6 +2000,34 @@ static void *ios_mach_exception_thread( void *arg )
                     dprintf(STDERR_FILENO,
                             "[int3-guest] guest_rip=0x%llx x28=0x%llx read=%d rev=ml554\n",
                             (unsigned long long)grip, (unsigned long long)x28v, ok);
+                    /* Build115: read-only CEF i386 chrome_elf.dll INT3 probe.
+                     * The logged guest RIP is mapped at chrome_elf+0x3a044
+                     * in multiple launches. An inaccessible guest address is
+                     * explicitly reported; never relax protection or skip BRK. */
+                    if (ok && (grip == 0x731ea044ULL || grip == 0x68f4a044ULL))
+                    {
+                        unsigned char bytes[32] = {0};
+                        mach_vm_size_t got_code = 0;
+                        kern_return_t read_status = mach_vm_read_overwrite(
+                            mach_task_self(), (mach_vm_address_t)(grip - 16),
+                            sizeof(bytes), (mach_vm_address_t)bytes, &got_code);
+                        dprintf(STDERR_FILENO,
+                                "[build115-cef-brk] guest_rip=0x%llx chrome_elf_rva=0x3a044 "
+                                "read_kr=%d bytes=%llu rsp=0x%llx rdx=0x%llx r8=0x%llx\n",
+                                (unsigned long long)grip, (int)read_status,
+                                (unsigned long long)got_code,
+                                (unsigned long long)gregs[4],
+                                (unsigned long long)gregs[2],
+                                (unsigned long long)gregs[8]);
+                        if (read_status == KERN_SUCCESS && got_code == sizeof(bytes))
+                        {
+                            int j;
+                            dprintf(STDERR_FILENO, "[build115-cef-brk] code[-16:+15]=");
+                            for (j = 0; j < (int)sizeof(bytes); ++j)
+                                dprintf(STDERR_FILENO, "%02x", bytes[j]);
+                            dprintf(STDERR_FILENO, "\n");
+                        }
+                    }
                     if (ok)
                     {
                         /* ml578: the GUEST register file — 16 entries, FEX order.
