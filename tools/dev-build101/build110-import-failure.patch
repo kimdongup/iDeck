@@ -1,0 +1,15 @@
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -1894,7 +1894,12 @@
+     {
+         dep_after = wm->ldr.DdagNode->Dependencies.Tail;
+         if (!import_dll( wm, &imports[i], load_path, &imp ))
++        {
++            const char *dll = (const char *)get_rva( wm->ldr.DllBase, imports[i].Name );
++            MESSAGE( "[build110-import-fail] importer=%s missing=%s descriptor=%d/%d peb=%p\n",
++                     debugstr_w(wm->ldr.BaseDllName.Buffer), dll, i + 1, nb_imports, NtCurrentTeb()->Peb );
+             status = STATUS_DLL_NOT_FOUND;
++        }
+         else if (imp && imp->ldr.DdagNode != node_ntdll && imp->ldr.DdagNode != node_kernel32)
+             add_module_dependency_after( wm->ldr.DdagNode, imp->ldr.DdagNode, dep_after );
+     }
