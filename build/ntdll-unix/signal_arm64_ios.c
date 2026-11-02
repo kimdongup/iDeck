@@ -2134,6 +2134,74 @@ static void *ios_mach_exception_thread( void *arg )
                                 }
                             }
                         }
+                        /* Build119: probe the exact lazy import resolver
+                         * behind chrome_elf +0x39ff0. The Build118 disassembly
+                         * shows [base+0x10b17c] as its cached function pointer,
+                         * and the remaining RVAs are literal operands in the
+                         * immutable instruction stream. Read only: do not
+                         * change exception handling, IAT, or function pointers. */
+                        if (wb)
+                        {
+                            unsigned int module_base = (unsigned int)(grip - 0x3a044ULL);
+                            unsigned char resolver[112] = {0};
+                            mach_vm_size_t nr = 0;
+                            kern_return_t rk = mach_vm_read_overwrite(
+                                mach_task_self(),
+                                (mach_vm_address_t)(wb + module_base + 0x39ff0U),
+                                sizeof(resolver), (mach_vm_address_t)resolver, &nr);
+                            dprintf(STDERR_FILENO,
+                                    "[build119-cef-resolver] function_rva=0x39ff0 kr=%d bytes=%llu\n",
+                                    (int)rk, (unsigned long long)nr);
+                            if (rk == KERN_SUCCESS && nr == sizeof(resolver))
+                            {
+                                unsigned bi;
+                                dprintf(STDERR_FILENO, "[build119-cef-resolver] hex=");
+                                for (bi=0; bi < nr; ++bi)
+                                    dprintf(STDERR_FILENO, "%02x", resolver[bi]);
+                                dprintf(STDERR_FILENO, "\n");
+                            }
+                            {
+                                struct { const char *name; unsigned int rva; } slots[] = {
+                                    {"cached-target", 0x10b17cU},
+                                    {"iat-call1", 0xda1f4U},
+                                    {"iat-call2", 0xda124U}
+                                };
+                                unsigned si;
+                                for (si=0; si < sizeof(slots)/sizeof(slots[0]); ++si)
+                                {
+                                    unsigned int ptr = 0;
+                                    mach_vm_size_t np = 0;
+                                    kern_return_t pk = mach_vm_read_overwrite(
+                                        mach_task_self(),
+                                        (mach_vm_address_t)(wb + module_base + slots[si].rva),
+                                        sizeof(ptr), (mach_vm_address_t)&ptr, &np);
+                                    dprintf(STDERR_FILENO,
+                                            "[build119-cef-slot] %s rva=0x%x kr=%d value=0x%x\n",
+                                            slots[si].name, slots[si].rva, (int)pk,
+                                            pk == KERN_SUCCESS && np == sizeof(ptr) ? ptr : 0);
+                                }
+                            }
+                            {
+                                char str[49] = {0}, print[49] = {0};
+                                mach_vm_size_t ns = 0;
+                                unsigned bi;
+                                kern_return_t sk = mach_vm_read_overwrite(
+                                    mach_task_self(),
+                                    (mach_vm_address_t)(wb + module_base + 0xd65ceU),
+                                    48, (mach_vm_address_t)str, &ns);
+                                if (sk == KERN_SUCCESS && ns == 48)
+                                {
+                                    for (bi=0; bi < 48 && str[bi]; ++bi)
+                                    {
+                                        unsigned char c = (unsigned char)str[bi];
+                                        print[bi] = c >= 32 && c < 127 ? (char)c : '?';
+                                    }
+                                }
+                                dprintf(STDERR_FILENO,
+                                        "[build119-cef-literal] rva=0xd65ce kr=%d ascii=\"%s\"\n",
+                                        (int)sk, print);
+                            }
+                        }
                         if (read_status == KERN_SUCCESS && got_code == sizeof(bytes))
                         {
                             int j;
