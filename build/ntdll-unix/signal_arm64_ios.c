@@ -2031,6 +2031,30 @@ static void *ios_mach_exception_thread( void *arg )
                                 (unsigned long long)gregs[4],
                                 (unsigned long long)gregs[2],
                                 (unsigned long long)gregs[8]);
+                        /* Build117: identify caller without dumping stack data.
+                         * Read the first i386 EBP frame using the same validated
+                         * WoW window and report return-address candidates only.
+                         * EBP/RSP values are 32-bit guest offsets, not host VAs. */
+                        if (wb)
+                        {
+                            unsigned int frame[2] = {0, 0}, candidate[2] = {0, 0};
+                            mach_vm_size_t nf = 0, ns = 0;
+                            kern_return_t fk = mach_vm_read_overwrite(
+                                mach_task_self(), (mach_vm_address_t)(wb + (unsigned int)gregs[5]),
+                                sizeof(frame), (mach_vm_address_t)frame, &nf);
+                            kern_return_t sk = mach_vm_read_overwrite(
+                                mach_task_self(), (mach_vm_address_t)(wb + (unsigned int)gregs[4]),
+                                sizeof(candidate), (mach_vm_address_t)candidate, &ns);
+                            dprintf(STDERR_FILENO,
+                                    "[build117-cef-caller] ebp_kr=%d rsp_kr=%d "
+                                    "ebp=0x%x rsp=0x%x frame_next=0x%x return=0x%x "
+                                    "stack_return=0x%x\n",
+                                    (int)fk, (int)sk, (unsigned int)gregs[5],
+                                    (unsigned int)gregs[4],
+                                    fk == KERN_SUCCESS && nf == sizeof(frame) ? frame[0] : 0,
+                                    fk == KERN_SUCCESS && nf == sizeof(frame) ? frame[1] : 0,
+                                    sk == KERN_SUCCESS && ns == sizeof(candidate) ? candidate[0] : 0);
+                        }
                         if (read_status == KERN_SUCCESS && got_code == sizeof(bytes))
                         {
                             int j;
