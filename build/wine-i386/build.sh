@@ -87,6 +87,18 @@ while IFS= read -r t; do
     TARGETS+=("$t")
 done < <(grep -oE '^(dlls|programs)/[^/]+/i386-windows/[^/ :]+' "$B/Makefile" | grep -E "$EXT_RE" | sort -u)
 [ ${#TARGETS[@]} -gt 0 ] || { echo "no i386 targets matched" >&2; exit 2; }
+# CEF imports wevtapi by delay load, so a static import closure omits it.
+# Full farm builds must contain wevtapi even if no staged DLL imports it.
+if [ $# -eq 0 ]; then
+    found_wevt=0
+    for t in "${TARGETS[@]}"; do
+        [ "$t" = "dlls/wevtapi/i386-windows/wevtapi.dll" ] && found_wevt=1
+    done
+    [ "$found_wevt" = 1 ] || {
+        echo "Missing required CEF delay-load target: wevtapi.dll" >&2
+        exit 2
+    }
+fi
 echo "== ${#TARGETS[@]} i386 modules (skipped by policy: ${#SKIP[@]} names) =="
 
 # -------------------------------------------------------------------- build
