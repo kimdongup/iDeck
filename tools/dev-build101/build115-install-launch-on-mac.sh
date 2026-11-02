@@ -20,7 +20,7 @@ python3 "$ROOT/tools/dev-build101/verify-build107-arm64x.py" "$APP/arm64ec-windo
 INFO=/usr/libexec/PlistBuddy
 BUILD="$("$INFO" -c 'Print :CFBundleVersion' "$APP/Info.plist")"
 BUNDLE="$("$INFO" -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
-[[ "$BUILD" == 114 && "$BUNDLE" == com.kimdongup.ideck.build100 ]] || {
+[[ "$BUILD" == 115 && "$BUNDLE" == com.kimdongup.ideck.build100 ]] || {
   echo "Unexpected app build $BUILD or id $BUNDLE" >&2; exit 5;
 }
 echo "Installing $BUNDLE build $BUILD to device $DEVICE"
