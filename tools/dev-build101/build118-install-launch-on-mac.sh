@@ -16,6 +16,10 @@ trap 'rm -rf "$TMP"' EXIT
 ditto -x -k "$IPA" "$TMP"
 APP="$TMP/Payload/Madeira.app"
 [[ -d "$APP" ]] || { echo "Missing app in IPA" >&2; exit 4; }
+if [[ ! -f "$APP/Madeira" ]] || ! LC_ALL=C grep -aFq "[build118-cef-code]" "$APP/Madeira"; then
+  echo "Build118 IPA missing native diagnostics; refusing to install a stale artifact." >&2
+  exit 4
+fi
 python3 "$ROOT/tools/dev-build101/verify-build107-arm64x.py" "$APP/arm64ec-windows/ntdll.dll"
 INFO=/usr/libexec/PlistBuddy
 BUILD="$("$INFO" -c 'Print :CFBundleVersion' "$APP/Info.plist")"

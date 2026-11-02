@@ -441,6 +441,11 @@ fi
 
 APP="$DERIVED/Build/Products/Debug-iphoneos/Madeira.app"
 HELPER="$APP/PlugIns/MadeiraJITHelper.appex"
+# Build118 must ship the exact new native exception diagnostics, not stale DerivedData.
+if [[ ! -f "$APP/Madeira" ]] || ! LC_ALL=C grep -aFq "[build118-cef-code]" "$APP/Madeira"; then
+  echo "Build118 native diagnostic marker missing in Madeira executable; refusing stale IPA." >&2
+  exit 5
+fi
 if [[ ! -d "$APP" || ! -d "$HELPER" ]]; then
   echo "Xcode succeeded but the main app or JITHelper extension is missing."
   exit 4
