@@ -16,7 +16,7 @@ trap 'rm -rf "$TMP"' EXIT
 ditto -x -k "$IPA" "$TMP"
 APP="$TMP/Payload/Madeira.app"
 [[ -d "$APP" ]] || { echo "Missing app in IPA" >&2; exit 4; }
-if [[ ! -f "$APP/Madeira" ]] || ! LC_ALL=C grep -aFq "[build120-cef-resolver]" "$APP/Madeira"; then
+if [[ ! -f "$APP/Madeira" ]] || ! LC_ALL=C grep -aFq "[build120-cef-dll]" "$APP/Madeira"; then
   echo "Build120 IPA missing native diagnostics; refusing to install a stale artifact." >&2
   exit 4
 fi

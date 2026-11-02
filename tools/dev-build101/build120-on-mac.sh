@@ -465,7 +465,7 @@ fi
 APP="$DERIVED/Build/Products/Debug-iphoneos/Madeira.app"
 HELPER="$APP/PlugIns/MadeiraJITHelper.appex"
 # Build120 must ship the exact new native exception diagnostics, not stale DerivedData.
-if [[ ! -f "$APP/Madeira" ]] || ! LC_ALL=C grep -aFq "[build120-cef-resolver]" "$APP/Madeira"; then
+if [[ ! -f "$APP/Madeira" ]] || ! LC_ALL=C grep -aFq "[build120-cef-dll]" "$APP/Madeira"; then
   echo "Build120 native diagnostic marker missing in Madeira executable; refusing stale IPA." >&2
   exit 5
 fi
