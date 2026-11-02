@@ -1604,6 +1604,37 @@ done:
              why, written, total, path );
 }
 
+/* FEX GuestSignal_SIGTRAP (Dispatcher.cpp) spills the static regs and then
+ * executes `brk #0` (0xd4200000). The 8-byte SynchronousFaultData word sits at
+ * CpuStateFrame+1496: sizeof(CPUState) is 1472, then ReturningStackLocation,
+ * InSyscallInfo and SignalHandlerRefCounter. Little-endian layout is
+ * flag, signal, trap, si_code, err_code:16. FAULT_SIGTRAP is 5 on this host
+ * (SIGTRAP) and on the Windows FEX numbering. X86_TRAPNO_DB is 1, BP is 3.
+ * A mismatch fails closed and leaves the existing signal path alone. */
+#define IOS_FEX_SYNC_FAULT_OFF 1496u
+
+static int ios_fex_read_guest_sigtrap( uint64_t frame, uint64_t *guest_rip, unsigned *trap_no )
+{
+    uint64_t word = 0, rip = 0;
+    mach_vm_size_t got = 0;
+
+    if (frame < 0x100000000ULL || (frame & 7)) return 0;
+    if (mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)(frame + 0x18),
+                                sizeof(rip), (mach_vm_address_t)&rip, &got ) != KERN_SUCCESS
+        || got != sizeof(rip) || !rip)
+        return 0;
+    if (mach_vm_read_overwrite( mach_task_self(),
+                                (mach_vm_address_t)(frame + IOS_FEX_SYNC_FAULT_OFF),
+                                sizeof(word), (mach_vm_address_t)&word, &got ) != KERN_SUCCESS
+        || got != sizeof(word))
+        return 0;
+    if ((word & 0xff) == 0) return 0;                 /* FaultToTop clear */
+    if (((word >> 8) & 0xff) != 5) return 0;          /* not SIGTRAP */
+    if (guest_rip) *guest_rip = rip;
+    if (trap_no) *trap_no = (unsigned)((word >> 16) & 0xff);
+    return 1;
+}
+
 static void *ios_mach_exception_thread( void *arg )
 {
     mach_port_t port = (mach_port_t)(uintptr_t)arg;
@@ -2556,6 +2587,38 @@ static void *ios_mach_exception_thread( void *arg )
         if (kr == KERN_SUCCESS)
         {
             uintptr_t fault_addr = (uintptr_t)req->code[1];
+#ifdef WINE_IOS
+            /* Dispatcher `brk #0` is FEX's guest SIGTRAP stub, not a store into
+             * the JIT alias and not an execute fault. Falling through made the
+             * store emulator print [store-undecoded] and then the UNHANDLED
+             * path wrote the whole JIT pool (~900MB) before SIGTRAP could be
+             * delivered. Do not skip the instruction and do not mark it
+             * handled: declining lets trap_handler raise the guest exception. */
+            if (req->exception == EXC_BREAKPOINT)
+            {
+                uint64_t bpc = (uint64_t)__darwin_arm_thread_state64_get_pc( state );
+                uint32_t binsn = 0;
+                mach_vm_size_t bgot = 0;
+                uint64_t grip = 0;
+                unsigned trap_no = 0;
+
+                if (!(bpc & 3) &&
+                    mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)bpc,
+                                            sizeof(binsn), (mach_vm_address_t)&binsn, &bgot ) == KERN_SUCCESS &&
+                    bgot == sizeof(binsn) && binsn == 0xd4200000 &&
+                    ios_fex_read_guest_sigtrap( state.__x[28], &grip, &trap_no ))
+                {
+                    static int sigtrap_logs;
+                    if (sigtrap_logs++ < 8)
+                        dprintf( STDERR_FILENO,
+                                 "[guest-sigtrap] brk#0 pc=0x%llx frame=0x%llx guest_rip=0x%llx trap=%u "
+                                 "— deliver via SIGTRAP, no store emulation, no jit dump\n",
+                                 (unsigned long long)bpc, (unsigned long long)state.__x[28],
+                                 (unsigned long long)grip, trap_no );
+                    goto ios_exc_reply;
+                }
+            }
+#endif
 #ifdef WINE_IOS
             /* ml939: THE SUB-FLOOR SERVICE BELONGS HERE, NOT IN segv_handler.
              *
@@ -4687,12 +4750,18 @@ static void *ios_mach_exception_thread( void *arg )
                     if (!emulated)
                     {
                         static int undecoded_n;
+                        /* `brk #0` is GuestSignal_SIGTRAP. It is not a store.
+                         * The fast path above declines it; this guard is the
+                         * same encoding if that path did not run. */
+                        if ((insn & 0xffe0001fu) == 0xd4200000u)
+                            goto skip_store_undecoded_log;
                         if (undecoded_n < 8)
                             dprintf(STDERR_FILENO,
                                 "[store-undecoded] #%d rev=ml350 insn=0x%08x pc=0x%llx addr=0x%llx "
                                 "rw_addr=0x%llx — alias OK, ADD THIS ENCODING to the case-4 emulator\n",
                                 ++undecoded_n, insn, (unsigned long long)fault_pc,
                                 (unsigned long long)fault_addr, (unsigned long long)rw_addr);
+                    skip_store_undecoded_log: ;
                     }
                     if (emulated)
                     {
@@ -6941,6 +7010,7 @@ skip_reclaim_band: ;
             }
         }
 
+    ios_exc_reply: ;
         /* Build reply */
         ios_exc_reply_t reply;
         reply.head.msgh_bits = MACH_MSGH_BITS( MACH_MSGH_BITS_REMOTE(req->head.msgh_bits), 0 );
@@ -14041,6 +14111,51 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 
     rec.ExceptionAddress = (void *)PC_sig(context);
     save_context( &ctx, sigcontext );
+
+#ifdef WINE_IOS
+    /* FEX's dispatcher stub. The host PC is the `brk #0` after SpillStaticRegs;
+     * the guest exception is the SynchronousFaultData word the JIT stored.
+     * Do not skip the instruction. setup_raise_exception subtracts 4 from the
+     * host PC for EXCEPTION_BREAKPOINT, so add it back first: Wow64 still has
+     * to see the PC on the stub for IsAddressInJit. The authoritative record
+     * is rewritten in BTCpuResetToConsistentState. */
+    if (!(PC_sig( context ) & 3))
+    {
+        uint32_t insn = 0;
+        mach_vm_size_t got = 0;
+        uint64_t grip = 0;
+        unsigned trap_no = 0;
+
+        if (mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)PC_sig( context ),
+                                    sizeof(insn), (mach_vm_address_t)&insn, &got ) == KERN_SUCCESS &&
+            got == sizeof(insn) && insn == 0xd4200000 &&
+            ios_fex_read_guest_sigtrap( REGn_sig( 28, context ), &grip, &trap_no ))
+        {
+            ULONG_PTR wow = NtCurrentTeb() ? ios_wow_base_for_peb( NtCurrentTeb()->Peb ) : 0;
+            uint64_t reported = grip;
+
+            if (trap_no == 3) /* X86_TRAPNO_BP: INT3, RIP already points past it */
+            {
+                rec.ExceptionCode = EXCEPTION_BREAKPOINT;
+                rec.NumberParameters = 1;
+                rec.ExceptionInformation[0] = 0;
+                if (reported) reported -= 1;
+                ctx.Pc += 4;
+            }
+            else if (trap_no == 1) /* X86_TRAPNO_DB */
+                rec.ExceptionCode = EXCEPTION_SINGLE_STEP;
+            else
+                rec.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
+            if (wow) reported = wow + (uint32_t)reported;
+            rec.ExceptionAddress = (void *)(uintptr_t)reported;
+            dprintf( 2, "[guest-sigtrap] raise code=%08x guest_rip=0x%llx trap=%u addr=%p pc=%llx\n",
+                     (unsigned)rec.ExceptionCode, (unsigned long long)grip, trap_no,
+                     rec.ExceptionAddress, (unsigned long long)PC_sig( context ) );
+            setup_raise_exception( sigcontext, &rec, &ctx );
+            return;
+        }
+    }
+#endif
 
     switch (siginfo->si_code)
     {
