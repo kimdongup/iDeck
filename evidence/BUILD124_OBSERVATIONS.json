@@ -1,0 +1,118 @@
+{
+  "snapshot": "2026-11-03 HST",
+  "project": "iDeck",
+  "kind": "sanitized diagnostic summary, not full source or logs",
+  "build124": {
+    "build_number": 124,
+    "app_version": "0.1.20",
+    "log_lines": 19270,
+    "previous_log_lines": 14,
+    "ui": "connecting steam controls…",
+    "compiled": true,
+    "ipa_zip_valid": true,
+    "app_and_ipa_executable_sha256_equal": true,
+    "device_launched": true,
+    "ui_ready_observed": false,
+    "ipa_sha256": "46e1a8c2838d95d689d150ff8dd48662bb45800b27d3794c514489bde0a64e42",
+    "events": [
+      {
+        "name": "steam.exe launch",
+        "count": 1,
+        "first_line": 1708
+      },
+      {
+        "name": "steamwebhelper launch incl. crashpad",
+        "count": 4,
+        "first_line": 3403
+      },
+      {
+        "name": "CEF NOTREACHED check.cc(376)",
+        "count": 2,
+        "first_line": 8177
+      },
+      {
+        "name": "CEF logging invalid destination",
+        "count": 2,
+        "first_line": 8235
+      },
+      {
+        "name": "crashpad server nonresponse",
+        "count": 1,
+        "first_line": 14534
+      },
+      {
+        "name": "FEX mprotect last-page warning",
+        "count": 161,
+        "first_line": 1957
+      },
+      {
+        "name": "FEX store-noalias",
+        "count": 4,
+        "first_line": 10386
+      },
+      {
+        "name": "FEX store-undecoded",
+        "count": 1,
+        "first_line": 17503
+      },
+      {
+        "name": "FEX av-detail",
+        "count": 2,
+        "first_line": 10387
+      },
+      {
+        "name": "FD CROSS!",
+        "count": 0,
+        "first_line": null
+      },
+      {
+        "name": "build124-guard marker",
+        "count": 0,
+        "first_line": null
+      },
+      {
+        "name": "BrowserReady",
+        "count": 0,
+        "first_line": null
+      },
+      {
+        "name": "FEX 16MiB allocation failure",
+        "count": 0,
+        "first_line": null
+      }
+    ],
+    "fex_reservation_16GiB_snapshots": [
+      {
+        "line": 1828,
+        "used_MiB": 0,
+        "pct": 0
+      },
+      {
+        "line": 12158,
+        "used_MiB": 6419,
+        "pct": 39,
+        "views": 781
+      },
+      {
+        "line": 14698,
+        "used_MiB": 6283,
+        "pct": 38,
+        "views": 765
+      }
+    ]
+  },
+  "build123": {
+    "log_lines": 38510,
+    "cef_notreached": 4,
+    "mprotect_warnings": 234,
+    "fd_cross_peb_records": 49,
+    "max_fex_virtual_reservation_pct": 94
+  },
+  "cautions": [
+    "Build124 capture shorter than Build123; count reductions cannot prove fix.",
+    "Virtual reservations are NOT physical RAM.",
+    "First CEF failure precedes the late FEX address exhaustion seen in Build123.",
+    "Log absence is not definitive proof of absent behavior.",
+    "No private source, signing assets or device identifiers are published in this branch."
+  ]
+}

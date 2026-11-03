@@ -1,3 +1,0 @@
-LIBRARY chrome_elf.dll
-EXPORTS
-    GetHandleVerifier
