@@ -22,9 +22,17 @@ All run on Mac mini with external APFS Repository drive mounted.
 bash /Volumes/Repository/cokacremote/iDeckRuntimeLab/iDeck/tools/dev-build101/build123-on-mac.sh --audit
 ```
 
-**Build and package, with limited parallelism on M1 8 GiB:**
+**Build and package, with low-memory parallelism on M1 8 GiB:**
+
+The shared Mac has only 8 GiB unified RAM. Set all four independent build
+concurrency controls explicitly. The external SSD is for build artifacts,
+not a substitute for unified memory or macOS internal swap space. Monitor
+Memory Pressure and internal disk free space; do not rely only on external
+SSD free space.
+
 ```bash
-BUILD123_FARM_JOBS=2 BUILD123_FARM_BATCH=12 \
+WINE_PE_JOBS=1 BUILD123_FARM_JOBS=1 BUILD123_FARM_BATCH=4 \
+BUILD123_DXMT_JOBS=1 BUILD123_XCODE_JOBS=1 \
 bash /Volumes/Repository/cokacremote/iDeckRuntimeLab/iDeck/tools/dev-build101/build123-on-mac.sh --build
 ```
 

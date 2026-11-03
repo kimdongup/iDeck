@@ -493,7 +493,7 @@ xcodebuild \
   -sdk iphoneos \
   -destination "generic/platform=iOS" \
   -derivedDataPath "$DERIVED" \
-  -jobs 2 \
+  -jobs "${BUILD123_XCODE_JOBS:-1}" \
   -allowProvisioningUpdates \
   LLVM_MINGW="$LLVM_MINGW" \
   CODE_SIGN_STYLE=Automatic \

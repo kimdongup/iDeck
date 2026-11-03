@@ -61,7 +61,11 @@ if [[ ! -f "$D/build-pe-i386/build.ninja" ]]; then
       --buildtype release -Dwine_build_path="$WINE_BUILD" -Dwine_builtin_dll=true \
       build-pe-i386)
 fi
-(cd "$D" && meson compile -C build-pe-i386 -j 2)
+DXMT_JOBS="${BUILD123_DXMT_JOBS:-1}"
+[[ "$DXMT_JOBS" =~ ^[1-4]$ ]] || {
+  echo "Invalid BUILD123_DXMT_JOBS (1..4)" >&2; exit 2
+}
+(cd "$D" && meson compile -C build-pe-i386 -j "$DXMT_JOBS")
 # Use a temporary file in the staged directory and an atomic rename for every
 # output. If DXMT build fails, existing farm files are not modified.
 for spec in \
