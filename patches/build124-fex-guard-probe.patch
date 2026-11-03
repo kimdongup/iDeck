@@ -1,0 +1,76 @@
+diff --git a/FEXCore/Source/Interface/Core/CPUBackend.cpp b/FEXCore/Source/Interface/Core/CPUBackend.cpp
+index 05895e90d..77e3ab804 100644
+--- a/FEXCore/Source/Interface/Core/CPUBackend.cpp
++++ b/FEXCore/Source/Interface/Core/CPUBackend.cpp
+@@ -536,7 +536,8 @@ namespace CPU {
+     uintptr_t LastPageAddr = AlignDown(reinterpret_cast<uintptr_t>(Ptr) + Size - 1, FEXCore::Utils::FEX_PAGE_SIZE);
+     if (!FEXCore::Allocator::VirtualProtect(reinterpret_cast<void*>(LastPageAddr), FEXCore::Utils::FEX_PAGE_SIZE,
+                                             FEXCore::Allocator::ProtectOptions::None)) {
+-      LogMan::Msg::EFmt("Failed to mprotect last page of code buffer.");
++      LogMan::Msg::EFmt("[build124-guard] origin=CodeBuffer ptr=0x{:x} guard=0x{:x} size=0x{:x} allocated=0x{:x} -- Failed to mprotect last page of code buffer.",
++                             reinterpret_cast<uintptr_t>(Ptr), LastPageAddr, Size, AllocatedSize);
+     }
+ 
+     FEXCore::Allocator::VirtualName("FEXMemJIT", reinterpret_cast<void*>(Ptr), Size);
+diff --git a/FEXCore/Source/Utils/LogManager.cpp b/FEXCore/Source/Utils/LogManager.cpp
+index 8d6be70f2..e37e99e16 100644
+--- a/FEXCore/Source/Utils/LogManager.cpp
++++ b/FEXCore/Source/Utils/LogManager.cpp
+@@ -64,7 +64,14 @@ void MFmtImpl(DebugLevels level, const char* fmt, const fmt::format_args& args)
+     LastDroppedFmt = fmt;
+     void* probe = FEXCore::Allocator::malloc(64);
+     if (!probe) {
+-      return;   // allocator dead in this copy — drop the message, survive
++      // allocator dead in this copy — but still surface the raw format string
++      // identity through the installed handler (which uses a stack buffer and
++      // does not depend on the FEX pool), so diagnostic probes such as the
++      // [build124-guard] marker are not silently dropped.
++      if (Handler) {
++        Handler(level, fmt);
++      }
++      return;
+     }
+     FEXCore::Allocator::free(probe);
+     if (Handler) {
+diff --git a/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h b/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h
+index 1c0c8b805..ce24d0b87 100644
+--- a/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h
++++ b/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h
+@@ -420,7 +420,8 @@ private:
+     uintptr_t LastPageAddr = AlignDown(reinterpret_cast<uintptr_t>(Ptr) + Size - 1, FEXCore::Utils::FEX_PAGE_SIZE);
+     if (!FEXCore::Allocator::VirtualProtect(reinterpret_cast<void*>(LastPageAddr), FEXCore::Utils::FEX_PAGE_SIZE,
+                                             FEXCore::Allocator::ProtectOptions::None)) {
+-      LogMan::Msg::EFmt("Failed to mprotect last page of code buffer.");
++      LogMan::Msg::EFmt("[build124-guard] origin=PooledAllocatorVirtualWithGuard ptr=0x{:x} guard=0x{:x} size=0x{:x} -- Failed to mprotect last page of code buffer.",
++                           reinterpret_cast<uintptr_t>(Ptr), LastPageAddr, Size);
+     }
+     if (Name) {
+       FEXCore::Allocator::VirtualName(Name, Ptr, Size);
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+index 5c7dd8686..79b56a3df 100644
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -1924,6 +1924,23 @@ bool BTCpuResetToConsistentStateImpl(EXCEPTION_POINTERS* Ptrs) {
+ 
+   auto& Fault = Thread->CurrentFrame->SynchronousFaultData;
+   *Exception = FEX::Windows::HandleGuestException(Fault, *Exception, WowContext.Eip, WowContext.Eax, WowContext.Ecx);
++  /* HandleGuestException writes a guest RIP. wine's host_ptr32() subtracts the
++   * WoW window base from ExceptionAddress on the way to the 32-bit record, so a
++   * relocated iOS window would wrap 0x6DBC6732. Addresses this module puts in
++   * the record stay host-side. Base == 0 keeps the upstream identity map. */
++  if (GuestWindow::Base) {
++    const auto HostIfGuest = [](uint64_t Addr) -> uint64_t {
++      return Addr < GuestWindow::Size ? GuestWindow::ToHost(Addr) : Addr;
++    };
++    Exception->ExceptionAddress =
++        reinterpret_cast<void*>(HostIfGuest(reinterpret_cast<uint64_t>(Exception->ExceptionAddress)));
++    if (Exception->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && Exception->NumberParameters >= 2) {
++      Exception->ExceptionInformation[1] = HostIfGuest(Exception->ExceptionInformation[1]);
++    }
++  }
++  LogMan::Msg::DFmt("guest-signal code: {:X} addr: {:X} signal: {} trap: {}", Exception->ExceptionCode,
++                    reinterpret_cast<uint64_t>(Exception->ExceptionAddress), static_cast<unsigned>(Fault.Signal),
++                    static_cast<unsigned>(Fault.TrapNo));
+   if (Exception->ExceptionCode == EXCEPTION_SINGLE_STEP) {
+     WowContext.EFlags &= ~(1 << FEXCore::X86State::RFLAG_TF_RAW_LOC);
+   }

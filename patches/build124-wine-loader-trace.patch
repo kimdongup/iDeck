@@ -1,0 +1,61 @@
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+index b316ccac6a..24066e1c44 100644
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -1894,7 +1894,12 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
+     {
+         dep_after = wm->ldr.DdagNode->Dependencies.Tail;
+         if (!import_dll( wm, &imports[i], load_path, &imp ))
++        {
++            const char *dll = (const char *)get_rva( wm->ldr.DllBase, imports[i].Name );
++            MESSAGE( "[build110-import-fail] importer=%s missing=%s descriptor=%d/%d peb=%p\n",
++                     debugstr_w(wm->ldr.BaseDllName.Buffer), dll, i + 1, nb_imports, NtCurrentTeb()->Peb );
+             status = STATUS_DLL_NOT_FOUND;
++        }
+         else if (imp && imp->ldr.DdagNode != node_ntdll && imp->ldr.DdagNode != node_kernel32)
+             add_module_dependency_after( wm->ldr.DdagNode, imp->ldr.DdagNode, dep_after );
+     }
+@@ -5757,11 +5762,13 @@ void loader_init( CONTEXT *context, void **entry )
+         ERR( "loader_init: update_load_config done, proceeding to load kernel32\n" );
+ #endif
+ 
++        MESSAGE( "[build109-pe-loader] stage=kernel32 begin peb=%p\n", NtCurrentTeb()->Peb );
+         if ((status = load_dll( NULL, L"kernel32.dll", 0, &kernel32, FALSE )) != STATUS_SUCCESS)
+         {
+             MESSAGE( "wine: could not load kernel32.dll, status %lx\n", status );
+             NtTerminateProcess( GetCurrentProcess(), status );
+         }
++        MESSAGE( "[build109-pe-loader] stage=kernel32 ok peb=%p\n", NtCurrentTeb()->Peb );
+         node_kernel32 = kernel32->ldr.DdagNode;
+         pBaseThreadInitThunk = RtlFindExportedRoutineByName( kernel32->ldr.DllBase, "BaseThreadInitThunk" );
+         LdrGetProcedureAddress( kernel32->ldr.DllBase, &ctrl_routine, 0, (void **)&pCtrlRoutine );
+@@ -5778,6 +5785,8 @@ void loader_init( CONTEXT *context, void **entry )
+ 
+         if (status)
+         {
++            MESSAGE( "[build109-pe-loader] stage=fixup_imports failed status=%lx image=%s\n",
++                     status, debugstr_w(NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer) );
+             ERR( "Importing dlls for %s failed, status %lx\n",
+                  debugstr_w(NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer), status );
+             NtTerminateProcess( GetCurrentProcess(), status );
+@@ -5837,6 +5846,7 @@ void loader_init( CONTEXT *context, void **entry )
+         if ((status = process_attach( node_ntdll, context ))
+              || (status = process_attach( node_kernel32, context )))
+         {
++            MESSAGE( "[build109-pe-loader] stage=system_attach failed status=%lx\n", status );
+             ERR( "Initializing system dll for %s failed, status %lx\n",
+                  debugstr_w(NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer), status );
+             NtTerminateProcess( GetCurrentProcess(), status );
+@@ -5847,10 +5857,12 @@ void loader_init( CONTEXT *context, void **entry )
+             if (last_failed_modref)
+                 ERR( "%s failed to initialize, aborting\n",
+                      debugstr_w(last_failed_modref->ldr.BaseDllName.Buffer) + 1 );
++            MESSAGE( "[build109-pe-loader] stage=dependency_attach failed status=%lx\n", status );
+             ERR( "Initializing dlls for %s failed, status %lx\n",
+                  debugstr_w(NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer), status );
+             NtTerminateProcess( GetCurrentProcess(), status );
+         }
++        MESSAGE( "[build109-pe-loader] stage=dependency_attach ok peb=%p\n", NtCurrentTeb()->Peb );
+         release_address_space();
+         if (wm->ldr.TlsIndex == -1) call_tls_callbacks( wm->ldr.DllBase, DLL_PROCESS_ATTACH );
+         if (wm->ldr.ActivationContext) RtlDeactivateActivationContext( 0, cookie );

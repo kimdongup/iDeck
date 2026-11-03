@@ -304,6 +304,34 @@ static void ios_fdt_note_close( int fd, const char *why, void *dead_peb )
                        (unsigned int)GetCurrentThreadId(), dead_peb);
 }
 
+/* BUILD124_FD_CACHE_CROSS_GUARD_V1: opt-in safety experiment.
+ * Prior traces reported fd-cache-release CROSS! records, yet teardown still
+ * closed those descriptors. When enabled, do not close an FD whose *live*
+ * ledger owner is a different pseudo-process. This ledger is diagnostic and
+ * may be stale, so leave the experiment OFF by default. The skipped entry is
+ * discarded with the dying process's cache; the observed live owner's FD is
+ * preserved. Set MADEIRA_FD_CACHE_CROSS_GUARD=1 to activate.
+ *
+ * This cannot fix the first CEF NOTREACHED (which precedes observed CROSS!).
+ */
+static int ios_fdt_guard_cross_cache_close( int fd, void *dead_peb )
+{
+    static int enabled = -1;
+    struct ios_fdt_ent *e;
+    if (enabled < 0)
+    {
+        const char *flag = getenv( "MADEIRA_FD_CACHE_CROSS_GUARD" );
+        enabled = flag && !strcmp( flag, "1" );
+    }
+    if (!enabled || fd < 0 || fd >= IOS_FDT_MAX) return 0;
+    e = &ios_fdt[fd];
+    if (!e->kind || e->kind == FDT_CLOSED || !e->peb || e->peb == dead_peb) return 0;
+    wine_log_write( "[fd-guard] SKIP fd-cache-release fd=%d owner_tid=%04x "
+                    "owner_peb=%p dead_peb=%p gen=%u rev=build124",
+                    fd, e->tid, e->peb, dead_peb, e->gen );
+    return 1;
+}
+
 /* victim autopsy: what the ledger knows about a failing comm fd */
 static void ios_fdt_autopsy( const char *what, int fd, int ret, int err )
 {
@@ -4039,6 +4067,8 @@ void ios_fd_cache_release( void *peb )
             if (!stored) continue;                              /* unset entry      */
             if (block[j].s.type == FD_TYPE_INVALID) continue;   /* cached NTSTATUS  */
             real_fd = stored - 1;
+            /* BUILD124_FD_CACHE_CROSS_GUARD_V1: skip only when opt-in. */
+            if (ios_fdt_guard_cross_cache_close( real_fd, peb )) continue;
             ios_fdt_note_close( real_fd, "fd-cache-release", peb );
             close( real_fd );
             closed++;
