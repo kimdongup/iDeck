@@ -23,8 +23,9 @@ if [[ "$MODE" == "--audit" ]]; then
   exit 0
 fi
 [[ "$(uname -s)" == Darwin ]] || { echo "DXMT i386 build requires macOS" >&2; exit 2; }
-# Prefer host tools already on PATH; otherwise use an isolated environment on
-# the external Repository SSD. Never touch macOS system Python packages.
+# Prefer host tools; install only missing tools into the external SSD venv.
+# The previous Ninja 1.12.1 pin is unavailable from the Mac pip index.
+# Ninja 1.13.2 was explicitly listed in the Mac pip error.
 if ! command -v meson >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
   VENV="$WORK/host-tools-venv"
   if [[ ! -x "$VENV/bin/python3" ]]; then
@@ -36,14 +37,25 @@ if ! command -v meson >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; the
       echo "Build123: unable to create isolated host-tools venv" >&2; exit 4;
     }
   fi
-  echo "Build123: installing pinned Meson + Ninja inside external venv"
-  "$VENV/bin/python3" -m pip install --disable-pip-version-check --no-input \
-    'meson==1.5.2' 'ninja==1.12.1' || {
-      echo "Build123: Meson/Ninja bootstrap failed (network or Python pip)." >&2
-      echo "Alternative on Mac: brew install meson ninja" >&2
-      exit 4
-    }
   export PATH="$VENV/bin:$PATH"
+  if ! command -v meson >/dev/null 2>&1; then
+    echo "Build123: installing Meson 1.5.2 into external venv"
+    "$VENV/bin/python3" -m pip install --disable-pip-version-check --no-input \
+      'meson==1.5.2' || {
+        echo "Build123: Meson bootstrap failed" >&2
+        echo "Alternative on Mac: brew install meson ninja" >&2
+        exit 4
+      }
+  fi
+  if ! command -v ninja >/dev/null 2>&1; then
+    echo "Build123: installing Ninja 1.13.2 into external venv"
+    "$VENV/bin/python3" -m pip install --disable-pip-version-check --no-input \
+      'ninja==1.13.2' || {
+        echo "Build123: Ninja bootstrap failed" >&2
+        echo "Alternative on Mac: brew install meson ninja" >&2
+        exit 4
+      }
+  fi
 fi
 echo "Build123 DXMT build tools: meson=$(meson --version), ninja=$(ninja --version)"
 for cmd in meson ninja xcrun; do

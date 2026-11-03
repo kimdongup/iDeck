@@ -92,3 +92,17 @@ A user can alternatively explicitly run brew install meson ninja.
 
 Build123 retains successful staged DLLs while processing unfinished
 modules, then uses the unchanged DXMT and packaged-IPA validation gates.
+
+
+## Build123 Meson/Ninja bootstrap fix
+
+All 19 previously failed Wine module targets built successfully on the Mac.
+The cumulative staging area contains 542 user-mode PE files (523 DLL
+files plus 19 other PE extensions). DXMT failed before setup because pip
+could not resolve the unavailable Ninja 1.12.1 version. This is not an
+out-of-memory failure.
+
+The new DXMT bootstrap uses the existing Ninja on PATH when available.
+Only missing tools are installed into the external SSD Python virtualenv:
+Meson 1.5.2 and, only if necessary, Ninja 1.13.2 (offered in the Mac
+pip index). Existing staged Wine files are left intact.
