@@ -23,6 +23,29 @@ if [[ "$MODE" == "--audit" ]]; then
   exit 0
 fi
 [[ "$(uname -s)" == Darwin ]] || { echo "DXMT i386 build requires macOS" >&2; exit 2; }
+# Prefer host tools already on PATH; otherwise use an isolated environment on
+# the external Repository SSD. Never touch macOS system Python packages.
+if ! command -v meson >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
+  VENV="$WORK/host-tools-venv"
+  if [[ ! -x "$VENV/bin/python3" ]]; then
+    echo "Build123: creating external SSD host-tools venv: $VENV"
+    command -v python3 >/dev/null || {
+      echo "Build123: Python3 required for Meson bootstrap" >&2; exit 4;
+    }
+    python3 -m venv "$VENV" || {
+      echo "Build123: unable to create isolated host-tools venv" >&2; exit 4;
+    }
+  fi
+  echo "Build123: installing pinned Meson + Ninja inside external venv"
+  "$VENV/bin/python3" -m pip install --disable-pip-version-check --no-input \
+    'meson==1.5.2' 'ninja==1.12.1' || {
+      echo "Build123: Meson/Ninja bootstrap failed (network or Python pip)." >&2
+      echo "Alternative on Mac: brew install meson ninja" >&2
+      exit 4
+    }
+  export PATH="$VENV/bin:$PATH"
+fi
+echo "Build123 DXMT build tools: meson=$(meson --version), ninja=$(ninja --version)"
 for cmd in meson ninja xcrun; do
   command -v "$cmd" >/dev/null || { echo "Build123 DXMT needs: $cmd" >&2; exit 4; }
 done

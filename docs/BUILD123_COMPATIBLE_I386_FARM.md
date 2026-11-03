@@ -68,3 +68,27 @@ bash /Volumes/Repository/cokacremote/iDeckRuntimeLab/iDeck/tools/dev-build101/bu
 - Python syntax compilation, Bash syntax checks, read-only audit on shared Linux workspace.
 - Existing Wine bootstrap Makefile supports 631 candidate module rules; actual status remains Mac build **not run**.
 - Existing configured DXMT `build-pe-i386/build.ninja` was absent on shared Linux path. Its Mac build may require further environment fixes; this must be reported, not bypassed.
+
+## Build123 after first 523/543 i386 modules succeeded
+
+First Mac run: 523 staged, 20 failed, Meson missing before DXMT setup.
+The staging area persists and the next farm run attempts only the missing
+targets; do not delete the stage or compiled Wine bootstrap tree.
+
+The failed 20 PE modules are d3dcompiler_33..43/46/47, jscript, msi,
+msxml3, vbscript, wbemprox, windows.devices.enumeration, wined3d.
+The latter is now explicitly excluded: the iOS port uses DXMT/Metal instead
+of Wine's wined3d backend. This leaves 19 retriable grammar-based failures. Logs
+show Bison syntax errors including unsupported %code directives. The
+Apple-provided Bison may be outdated. On a Mac with Homebrew, run
+brew install bison to provide a modern grammar parser. The Build123 wrapper
+automatically prefers Homebrew's keg-only Bison if installed.
+
+DXMT needs Meson >=1.3 and Ninja. The DXMT script now creates an isolated
+external SSD venv at ../build123-artifacts/host-tools-venv, if either tool
+is missing, and installs pinned Meson 1.5.2 and Ninja 1.12.1 there. No
+system Python packages are altered. This requires initial network access.
+A user can alternatively explicitly run brew install meson ninja.
+
+Build123 retains successful staged DLLs while processing unfinished
+modules, then uses the unchanged DXMT and packaged-IPA validation gates.

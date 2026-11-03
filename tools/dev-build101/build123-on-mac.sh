@@ -104,6 +104,20 @@ for tool in i686-w64-mingw32-clang aarch64-w64-mingw32-clang; do
   fi
 done
 export PATH="$WINE_MINGW_BIN:$PATH"
+# Optional parser-based Wine DLLs require modern Bison. Apple bison 2.3
+# cannot parse newer grammar directives, so prefer keg-only Homebrew Bison
+# when it is installed. Do not modify global configuration.
+if command -v brew >/dev/null 2>&1; then
+  BREW_BISON="$(brew --prefix bison 2>/dev/null || true)/bin"
+  if [[ -x "$BREW_BISON/bison" ]]; then
+    export PATH="$BREW_BISON:$PATH"
+  fi
+fi
+if command -v bison >/dev/null 2>&1; then
+  echo "Build123 Bison: $(bison --version | head -1)"
+else
+  echo "Build123 warning: GNU Bison missing; parser-based Wine DLLs may fail" >&2
+fi
 for tool in i686-w64-mingw32-clang aarch64-w64-mingw32-clang; do
   if [[ "$(command -v "$tool")" != "$WINE_MINGW_BIN/$tool" ]]; then
     echo "Build123 cannot resolve pinned cross compiler: $tool" >&2

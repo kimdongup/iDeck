@@ -28,7 +28,8 @@ REQUIRED = {
 }
 # DXMT owns graphics; do not stage Wine/wined3d's DXGI or D3D libraries.
 GRAPHICS = {"dxgi.dll", "d3d11.dll", "d3d10core.dll", "winemetal.dll",
-            "d3d9.dll", "d3d9shim.dll", "d3d9-emulated.dll"}
+            "d3d9.dll", "d3d9shim.dll", "d3d9-emulated.dll",
+            "wined3d.dll"}
 # The iOS host cannot provide the Unix/display or kernel components below.
 EXCLUDE = set("""
 winevulkan.dll vulkan-1.dll opencl.dll wpcap.dll wineps.drv winemac.drv

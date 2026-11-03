@@ -45,7 +45,9 @@ class FarmTests(unittest.TestCase):
         self.assertIn("dlls/wtsapi32/i386-windows/wtsapi32.dll",targets)
         self.assertIn("dlls/powrprof/i386-windows/powrprof.dll",targets)
         self.assertNotIn("dlls/dxgi/i386-windows/dxgi.dll",targets)
+        self.assertNotIn("dlls/wined3d/i386-windows/wined3d.dll", targets)
         self.assertTrue(any("dxgi.dll" in item["target"] for item in skips))
+        self.assertTrue(any("wined3d.dll" in item["target"] for item in skips))
 
     def test_audit_does_not_create_stage(self):
         with tempfile.TemporaryDirectory() as t:
