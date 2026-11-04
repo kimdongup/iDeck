@@ -1417,9 +1417,16 @@ struct ContentView: View {
                 let automaticFLS = ProcessInfo.processInfo.arguments.contains("madeira-fls-diagnostics")
                 let automaticLoginFirst = ProcessInfo.processInfo.arguments.contains("madeira-steam-login-desktop-experiment")
                 let automaticRatatan = ProcessInfo.processInfo.arguments.contains("madeira-ratatan-thread-experiment")
-                let automaticBigPicture = automaticRatatan || ProcessInfo.processInfo.arguments.contains("madeira-steam-big-picture-x86-experiment")
-                let automaticX86Client = automaticLoginFirst || automaticBigPicture || ProcessInfo.processInfo.arguments.contains("madeira-steam-ui-x86-experiment")
-                let automaticSteamUI = automaticX86Client || ProcessInfo.processInfo.arguments.contains("madeira-steam-ui-experiment")
+                let automatic64 = SteamUIExperiment.usesSteam64(arguments: ProcessInfo.processInfo.arguments)
+                let automaticBigPicture =
+                    ProcessInfo.processInfo.arguments.contains("madeira-steam64-big-picture-experiment")
+                    || automaticRatatan
+                    || ProcessInfo.processInfo.arguments.contains("madeira-steam-big-picture-x86-experiment")
+                let automaticX86Client = !automatic64 &&
+                    (automaticLoginFirst || automaticBigPicture ||
+                     ProcessInfo.processInfo.arguments.contains("madeira-steam-ui-x86-experiment"))
+                let automaticSteamUI = automatic64 || automaticX86Client ||
+                    ProcessInfo.processInfo.arguments.contains("madeira-steam-ui-experiment")
                 if IDeckState.enabled && !automaticSteamUI && !automaticX86CEF && !automaticNativeVM && !automaticReservation && !automaticFLS {
                     ideck.checkPrerequisites()
                     if IDeckRules.shouldAutoStart(setup: ideck.setupDone, ready: ideck.ready,
@@ -3487,9 +3494,12 @@ struct ContentView: View {
             }
             Thread.sleep(forTimeInterval: 2.0)
 
-            // Step 6: Detach debugger — main thread should have zero accumulated hang time
-            logStore.log("Detaching debugger...")
-            StikJITHelper.detachDebugger()
+            // Step 6: Avoid duplicate StikDebug BRK after early detach.
+            if !earlyDetach && pool != nil {
+                StikJITHelper.detachDebugger()
+            } else {
+                logStore.log("[jit-detach] final detach skipped — early detach already requested")
+            }
 
             DispatchQueue.main.async {
                 heartbeat.invalidate()
@@ -3660,7 +3670,7 @@ struct ContentView: View {
             logStore.log("[steam-ui-probe] launch refused: fresh isolated JIT session required", level: .error)
             return
         }
-        let prefix = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("wine")
+        let prefix = SteamUIExperiment.runtimePrefix
         do {
             let args = try SteamUIExperiment.prepareProbe(prefix: prefix, flag: MadeiraConfig.get(SteamUIExperiment.flag), bundleID: Bundle.main.bundleIdentifier, fls: fls, reservation: reservation, x86CEF: x86CEF, keyedEvent: keyedEvent, swiftshader: swiftshader, platform: platform)
             steamUIStarting = true
@@ -3676,7 +3686,15 @@ struct ContentView: View {
         guard ideck.ready, !ideck.running, !ideck.preparing, !ideck.repairRequiresRestart, !jitCoordinator.busy, wine_process_is_running() == 0 else { return }
         ideck.error = nil
         UserDefaults.standard.set(true, forKey: "iDeckSetupComplete")
-        let launch = { startSteamUIExperiment(x86Client: true, bigPicture: true, accountChooser: accountChooser, loginFirst: accountChooser) }
+        let steam64 = SteamUIExperiment.steam64
+        let launch = {
+            startSteamUIExperiment(
+                x86Client: !steam64,
+                bigPicture: !steam64,
+                accountChooser: accountChooser,
+                loginFirst: accountChooser
+            )
+        }
         if jit_check_debugged() && StikJITHelper.ready { launch() }
         else { launchAfterJIT = launch; enableJIT() }
     }
@@ -3687,7 +3705,7 @@ struct ContentView: View {
             logStore.log("[steam-ui] launch refused: isolated experimental app, JIT and a fresh session are required", level: .error)
             return
         }
-        let prefix = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("wine")
+        let prefix = SteamUIExperiment.runtimePrefix
         let size = configuredDesktopSize(default: ResolutionChoices.defaultSize())
         do {
             if x86Client, let source = Bundle.main.resourceURL?.appendingPathComponent("Steam32OfficialClient"),
@@ -3825,7 +3843,7 @@ struct ContentView: View {
         logStore.log("Starting wineserver...")
 
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let winePrefixPath = documentsPath.appendingPathComponent("wine").path
+        let winePrefixPath = SteamUIExperiment.runtimePrefix.path
 
         logStore.log("Wine prefix: \(winePrefixPath)")
 
@@ -3846,7 +3864,7 @@ struct ContentView: View {
         }
 
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let winePrefixPath = documentsPath.appendingPathComponent("wine").path
+        let winePrefixPath = SteamUIExperiment.runtimePrefix.path
 
         // Call synchronously — caller already waited for wineserver to be ready
         let result = wine_process_start(winePrefixPath)

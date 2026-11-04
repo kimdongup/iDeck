@@ -4,6 +4,49 @@ import Foundation
 
 // Experimental genuine Windows Steam UI. No Dock token transfer and no UI replica.
 enum SteamUIExperiment {
+    // Build145: opt-in Steam64 prefix isolation.
+    static func usesSteam64(arguments: [String]) -> Bool {
+        arguments.contains("madeira-steam64-experiment")
+        || arguments.contains("madeira-steam64-big-picture-experiment")
+    }
+    // BUILD149_STEAM64_DEFAULT_V3: use AMD64 client in the normal iDeck menu.
+    // Do not change explicit diagnostic argument interpretation.
+    static func menuPrefersSteam64(arguments: [String]) -> Bool {
+        if usesSteam64(arguments: arguments) { return true }
+        guard Bundle.main.object(forInfoDictionaryKey: "IDeckEnabled") as? Bool == true else { return false }
+        let legacy: Set<String> = [
+            "madeira-steam-ui-x86-experiment",
+            "madeira-steam-big-picture-x86-experiment",
+            "madeira-steam-login-desktop-experiment",
+            "madeira-ratatan-thread-experiment",
+        ]
+        return !arguments.contains { legacy.contains($0) }
+    }
+
+    static var steam64: Bool {
+        menuPrefersSteam64(arguments: ProcessInfo.processInfo.arguments)
+    }
+
+    static func runtimePrefix(
+        documents: URL,
+        arguments: [String]
+    ) -> URL {
+        documents.appendingPathComponent(
+            menuPrefersSteam64(arguments: arguments)
+                ? "wine-steam64" : "wine"
+        )
+    }
+
+    static var runtimePrefix: URL {
+        runtimePrefix(
+            documents: FileManager.default.urls(
+                for: .documentDirectory,
+                in: .userDomainMask
+            )[0],
+            arguments: ProcessInfo.processInfo.arguments
+        )
+    }
+
     static let flag = "env.MADEIRA_EXPERIMENTAL_STEAM_UI"
     static let bigPictureFlag = "env.MADEIRA_EXPERIMENTAL_BIG_PICTURE"
     static let sessionKey = "MADEIRA_STEAM_UI_SESSION"
@@ -207,6 +250,51 @@ enum SteamUIExperiment {
         }
         return backup
     }
+
+    // Build145: verify the complete AMD64 Steam/CEF launch set.
+    static func clientDirectory(
+        prefix: URL,
+        x86Client: Bool
+    ) -> String? {
+        let drive = prefix.appendingPathComponent("drive_c")
+        let candidates = x86Client
+            ? ["Steam32BundleLab", "Steam32Lab"]
+            : ["Program Files/Steam", "Program Files (x86)/Steam"]
+
+        for relative in candidates {
+            let root = drive.appendingPathComponent(relative)
+            guard root.standardizedFileURL.path ==
+                    root.resolvingSymlinksInPath().standardizedFileURL.path
+            else { continue }
+
+            let machine: UInt16 = x86Client ? 0x014c : 0x8664
+            guard isPE(root.appendingPathComponent("steam.exe"),
+                       machine: machine),
+                  isPE(root.appendingPathComponent(
+                       x86Client ? "steamclient.dll" : "steamclient64.dll"),
+                       machine: machine)
+            else { continue }
+
+            let cefFolders = x86Client
+                ? ["bin/cef/cef.win7"]
+                : ["bin/cef/cef.win64", "bin/cef/cef.win7x64", "bin/cef"]
+
+            if cefFolders.contains(where: { folder in
+                let cef = root.appendingPathComponent(folder)
+                return isPE(
+                    cef.appendingPathComponent("steamwebhelper.exe"),
+                    machine: machine
+                ) && isPE(
+                    cef.appendingPathComponent("libcef.dll"),
+                    machine: machine
+                )
+            }) {
+                return relative
+            }
+        }
+        return nil
+    }
+
     static func prepare(prefix: URL, width: Int, height: Int, flag: String?, bundleID: String?, x86Client: Bool = false, bigPicture: Bool = false, bigPictureFlag: String? = nil, accountChooser: Bool = false, loginFirst: Bool = false, ratatanThreadTest: Bool = false) throws -> Plan {
         guard allowed(flag: flag, bundleID: bundleID) else { throw Failure.disabled }
         guard !bigPicture || bigPictureFlag == "1" else { throw Failure.disabled }
@@ -476,7 +564,11 @@ import UIKit
         let helper = Bundle.main.builtInPlugInsURL?.appendingPathComponent(MadeiraBuiltInJIT.helperFile)
         return IDeckPreflight(
             runtime: bundledRuntimeAvailable && IDeckRules.runtimeReady(prefix: prefix),
-            steam: steamIntegrityVerified && IDeckRules.steamClientReady(prefix: prefix),
+            steam: SteamUIExperiment.steam64
+                ? (SteamUIExperiment.clientDirectory(
+                    prefix: prefix, x86Client: false) != nil)
+                : (steamIntegrityVerified &&
+                   IDeckRules.steamClientReady(prefix: prefix)),
             signing: signing.known ? signing.debuggable : nil,
             builtIn: JITCoordinator.shared.resolvedMethod == .builtIn,
             helper: MadeiraBuiltInJIT.isAvailable && helper.map { FileManager.default.fileExists(atPath: $0.path) } == true,
@@ -494,7 +586,7 @@ import UIKit
             for (index, step) in IDeckPrerequisite.allCases.enumerated() {
                 prerequisites[index] = .init(id: step, status: .checking, detail: "Checking…")
                 await Task.yield()
-                if step == .steam && !running && wine_process_is_running() == 0 && wineserver_is_running() == 0 && !StikJITHelper.poolTaken {
+                if step == .steam && !SteamUIExperiment.steam64 && !running && wine_process_is_running() == 0 && wineserver_is_running() == 0 && !StikJITHelper.poolTaken {
                     // Hash all public resources off the UI executor, using the installer's exact rules.
                     steamIntegrityVerified = (try? await SteamClientInstaller.shared.verifyInstalled(prefix: prefix)) == true
                 }
@@ -513,10 +605,10 @@ import UIKit
             if !bundledRuntimeAvailable {
                 prerequisites[0].detail = "Runtime files are missing from this installation. Reinstall iDeck."
             }
-            if !IDeckRules.steamClientReady(prefix: prefix) {
+            if !SteamUIExperiment.steam64 && !IDeckRules.steamClientReady(prefix: prefix) {
                 prerequisites[1].detail = IDeckRules.clientIssues(prefix: prefix).joined(separator: "\n") + "\nRepair Steam files below. Account data and games are preserved."
             }
-            if IDeckRules.steamClientReady(prefix: prefix) && !steamIntegrityVerified {
+            if !SteamUIExperiment.steam64 && IDeckRules.steamClientReady(prefix: prefix) && !steamIntegrityVerified {
                 prerequisites[1] = .init(id: .steam, status: .needsAction, detail: "The complete pinned Steam/CEF client could not be verified. Use Repair Steam Files; accounts and games are preserved.")
             }
             refresh()
@@ -525,9 +617,13 @@ import UIKit
         }
     }
     var setupDone: Bool { UserDefaults.standard.bool(forKey: "iDeckSetupComplete") }
-    var prefix: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("wine") }
+    var prefix: URL { SteamUIExperiment.runtimePrefix }
     func refresh() {
-        ready = steamIntegrityVerified && IDeckRules.clientReady(prefix: prefix)
+        ready = SteamUIExperiment.steam64
+            ? (IDeckRules.runtimeReady(prefix: prefix)
+               && SteamUIExperiment.clientDirectory(
+                    prefix: prefix, x86Client: false) != nil)
+            : (steamIntegrityVerified && IDeckRules.clientReady(prefix: prefix))
     }
     @Published private(set) var repairRequiresRestart = false
     var canRepairSteam: Bool {
@@ -537,7 +633,11 @@ import UIKit
     private var steamInstallTask: Task<Void, Never>?
     var steamInstallActive: Bool { steamInstallTask != nil }
     var steamInstallActionTitle: String {
-        FileManager.default.fileExists(atPath: prefix.appendingPathComponent("drive_c/Steam32BundleLab").path)
+        if SteamUIExperiment.steam64 {
+            return SteamUIExperiment.clientDirectory(prefix: prefix, x86Client: false) != nil
+                ? "Steam64 detected — recheck" : "Check Steam64 files"
+        }
+        return FileManager.default.fileExists(atPath: prefix.appendingPathComponent("drive_c/Steam32BundleLab").path)
             ? "Repair Steam Files" : "Download & Install Steam"
     }
     func cancelSteamInstall() { steamInstallTask?.cancel() }
@@ -557,6 +657,10 @@ import UIKit
     }
     func repairSteam() { installSteam(manual: true) }
     func installSteam(manual: Bool = false) {
+        guard !SteamUIExperiment.steam64 else {
+            error = "Steam64 mode: use the verified AMD64 Steam files in Documents/wine-steam64. The legacy Steam32 downloader is disabled; run Check all prerequisites to rescan."
+            return
+        }
         guard Self.enabled, canRepairSteam, !repairRequiresRestart, !checkingPrerequisites, !JITCoordinator.shared.busy else { return }
         preparing = true; error = nil; autoStart = false
         steamInstallProgress = .init(phase: .checking)
@@ -697,7 +801,7 @@ import UIKit
                             throw NSError(domain: "iDeck", code: 3, userInfo: [NSLocalizedDescriptionKey: "Runtime preparation failed. Your files have been preserved."])
                         }
                     }
-                    if !IDeckRules.steamClientReady(prefix: target),
+                    if !SteamUIExperiment.steam64 && !IDeckRules.steamClientReady(prefix: target),
                        let source = Bundle.main.resourceURL?.appendingPathComponent("Steam32OfficialClient"), fm.fileExists(atPath: source.path) {
                         try SteamUIExperiment.importBundledX86(source: source, prefix: target,
                             flag: MadeiraConfig.get(SteamUIExperiment.flag) ?? "1", bundleID: Bundle.main.bundleIdentifier)
@@ -858,7 +962,11 @@ struct IDeckLauncher: View {
                             Text("Repair missing or incompatible Steam/browser program files without deleting accounts, games or saves. Replaced public files are backed up. Close Steam and reopen iDeck first if a session has already started.").font(.caption).foregroundStyle(.secondary)
                             Button(state.steamInstallActionTitle) { state.installSteam() }
                                 .buttonStyle(.borderedProminent).disabled(!state.canRepairSteam || jit.busy || state.checkingPrerequisites || state.repairRequiresRestart)
-                            Text("Downloads the complete pinned legacy client directly from Valve. This older Windows client is unsupported by Valve; continued sign-in is not guaranteed. No Steam files are bundled.").font(.caption).foregroundStyle(.secondary)
+                            if SteamUIExperiment.steam64 {
+                                Text("Steam64 (AMD64) mode: reuse the existing Steam folder in Documents/wine-steam64. This build does not download a Steam64 client. Recheck files after copying.").font(.caption).foregroundStyle(.secondary)
+                             } else {
+                                Text("Downloads the pinned legacy 32-bit client directly from Valve. This is only for explicit x86 mode.").font(.caption).foregroundStyle(.secondary)
+                             }
                             Link("Steam Subscriber Agreement", destination: URL(string: "https://store.steampowered.com/subscriber_agreement/")!)
                             Button("Use manual repair/import instead") { state.repairSteam() }
                                 .buttonStyle(.bordered).disabled(!state.canRepairSteam || jit.busy || state.checkingPrerequisites || state.repairRequiresRestart)
