@@ -3162,14 +3162,23 @@ static void start_main_thread(void)
         ios_jumbo_holdback_init();
     }
 
+    /* File-backed, categorical milestones for debugging Wine PE bootstrap. */
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=ntdll state=begin\n");
     WINE_IOS_LOG("load_ntdll...");
     load_ntdll();
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=ntdll state=ok\n");
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=wow64-ntdll state=begin\n");
     WINE_IOS_LOG("load_wow64_ntdll...");
     load_wow64_ntdll( main_image_info.Machine );
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=wow64-ntdll state=ok\n");
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=apiset state=begin\n");
     WINE_IOS_LOG("load_apiset_dll...");
     load_apiset_dll();
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=apiset state=ok\n");
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=server-init-done state=begin\n");
     WINE_IOS_LOG("server_init_process_done...");
     server_init_process_done();
+    dprintf(STDERR_FILENO, "[wine-bootstrap] stage=server-init-done state=ok\n");
 }
 
 #ifdef __ANDROID__
