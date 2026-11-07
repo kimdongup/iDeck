@@ -34,6 +34,7 @@
 #include "WineServerBridge.h"
 #include "PrefixExtractor.h"
 #include "FEXBridge.h"  // fex_get_jit_write_offset()
+#include "SteamUIDiagnostics.h"
 
 // Thread-local globals for wine_ios_exit longjmp (used by wine_ios_exit.h shim in ntdll)
 // Each Wine "process" thread has its own jmpbuf so child processes can exit independently.
@@ -930,8 +931,16 @@ static void *wine_process_thread(void *arg) {
             const char *verbose = getenv("MADEIRA_DEBUG_VERBOSE");
             const char *steam_ui = getenv("MADEIRA_STEAM_UI_SESSION");
             if (steam_ui && !strcmp(steam_ui, "1")) {
-                setenv("WINEDEBUG", "-all", 1); // no raw CEF command lines/credential-bearing payloads
-                LOG("[steam-ui] Wine payload-wide debug channels disabled; categorical evidence only");
+                const char *module_errors = getenv("MADEIRA_STEAM_UI_MODULE_ERRORS");
+                if (module_errors && !strcmp(module_errors, "1")) {
+                    // Opt-in module errors only; never trace process arguments,
+                    // file contents, relay parameters, authentication or URLs.
+                    setenv("WINEDEBUG", "-all,err+module", 1);
+                    LOG("[steam-ui] module-load errors enabled; all trace channels disabled");
+                } else {
+                    setenv("WINEDEBUG", "-all", 1); // no raw CEF command lines/credential-bearing payloads
+                    LOG("[steam-ui] Wine payload-wide debug channels disabled; categorical evidence only");
+                }
             } else if (verbose && *verbose && *verbose != '0') {
                 setenv("WINEDEBUG", "err+all,fixme+all,warn+module,warn+file,trace+process,trace+module,trace+loaddll,trace+loadorder,trace+win,trace+user32,trace+syscall,trace+file", 1);
                 LOG("WINEDEBUG = verbose (MADEIRA_DEBUG_VERBOSE set)");
@@ -1349,6 +1358,18 @@ static void *wine_process_thread(void *arg) {
                 dup2(logfd, STDOUT_FILENO);
                 close(logfd);
             }
+        }
+
+        /* Steam UI sessions should not periodically interrupt guest threads
+         * merely to profile them. Apply after all explicit configuration, and
+         * retain ordinary games' policy plus an explicit diagnostic opt-out. */
+        int ui_diagnostics = madeira_steam_ui_diagnostic_defaults();
+        if (ui_diagnostics > 0) {
+            fprintf(stderr, "[steam-ui-render] diagnostic-samplers=%s periodic-stack-dumps=%s; pure-sampling-policy-v2; VM policy untouched; error capture retained\n",
+                    madeira_steam_ui_sampling_disabled() ? "off" : "on",
+                    madeira_steam_ui_periodic_stacks_enabled() ? "on" : "off");
+        } else if (ui_diagnostics < 0) {
+            fprintf(stderr, "[steam-ui-render] sampling default could not be applied\n");
         }
 
         // Pick which exe to run (env var override, default = cube.exe).
