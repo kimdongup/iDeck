@@ -1741,10 +1741,11 @@ void winios_window_frame(HWND hwnd, int x, int y, int w, int h, int visible,
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
         l.frame = winios_layer_rect(x, y, w, h);
-        l.hidden = !visible;
+        int is_vis = visible || (!g_comp_game && w >= 300 && h >= 100);
+        l.hidden = !is_vis;
         /* a game-mode window whose bits came before its position is on
          * screen now -- the library's starting screen counts it */
-        if (g_comp_game && visible && l.contents)
+        if (g_comp_game && is_vis && l.contents)
             atomic_fetch_add_explicit(&g_surface_present_count, 1, memory_order_relaxed);
         winios_apply_contents_rect(key, l);
         winios_place_metal_layer(key);
@@ -2200,6 +2201,11 @@ int winios_surface_present(HWND hwnd, int dx, int dy, int dw, int dh,
             l.contents = (__bridge id)img;
             if (pending) { l.hidden = YES; winios_sync_metal_hidden(key, l); }   /* winios_window_frame decides */
             else atomic_fetch_add_explicit(&g_surface_present_count, 1, memory_order_relaxed);
+            /* Build 198/204: if a top-level application window (>= 300x100) delivers
+             * rendered surface pixels in desktop mode, ensure its layer is visible. */
+            if (!g_comp_game && sw >= 300 && sh >= 100 && l.hidden) {
+                l.hidden = NO;
+            }
             g_surf_sizes[key] = [NSValue valueWithCGSize:CGSizeMake(sw, sh)];
             if (!pending && CGRectIsEmpty(l.frame)) {
                 /* frame not delivered yet — place at surface size */

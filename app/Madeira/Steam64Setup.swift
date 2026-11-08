@@ -20,8 +20,8 @@ enum Steam64SetupError: LocalizedError {
 enum Steam64Components {
     struct Item { let resource: String; let destination: String; let bytes: Int64; let sha256: String }
     static let items = [
-        Item(resource: "chrome_elf.dll", destination: "Program Files/Steam/bin/cef/cef.win64/chrome_elf.dll", bytes: 1405592, sha256: "a149c31d987c8b65e1d1a8bee9ea8178e90b8f0a41d286f1e6202efe2d5ab416"),
-        Item(resource: "libcef.dll", destination: "Program Files/Steam/bin/cef/cef.win64/libcef.dll", bytes: 219859608, sha256: "9f53b8fbd16cb7bddc75a31e8edd48510d0a17c4315c2e7536be6d3b55b08635"),
+        Item(resource: "chrome_elf.dll", destination: "Program Files/Steam/bin/cef/cef.win64/chrome_elf.dll", bytes: 1405592, sha256: "aeaee57073db5a085809768b1e3bd1438410c120b22626afc5b101d8940d1666"),
+        Item(resource: "libcef.dll", destination: "Program Files/Steam/bin/cef/cef.win64/libcef.dll", bytes: 219859608, sha256: "1f593f150180f86d5ad4e309297c196dd0d1bf15d23b4060ff63ebba8bae5aac"),
         Item(resource: "crashpad_handler.exe", destination: "iDeckCEF64Crashpad/crashpad_handler.exe", bytes: 25614848, sha256: "76303a50b472a8a97c7d336564f00498ab5d34104d1f5c994056125528d8fd11"),
         Item(resource: "config_guard.exe", destination: "iDeckCEF64Crashpad/config_guard.exe", bytes: 91136, sha256: "0d7e0e45215c94da469d1c167aaa3533e2a9c563d4acc5f13b567860011a5640")
     ]
