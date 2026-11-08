@@ -1,0 +1,15 @@
+{
+  "cef_revision": "a5d51ba9db7ee74a523dc247bd09ec91ba4d7446",
+  "chromium_revision": "2e81dea53f5ecdc1c057e4c70ecd66151987296a",
+  "chromium_tag": "126.0.6478.183",
+  "depot_tools_revision": "fca881606e",
+  "header_sha256": "96faadaf33cafc64caba2d404838e765453dd45f3cc6d8747d7278c6faebdf34",
+  "cef_build_gn_sha256": "61184106c1693c073a08e775ca30f8b864d8c815bcdd3a724363f85531eeb7fe",
+  "cef_api_header_sha256": "874bea19afa3d678b1336b91e7f798a4c6ea5bf9febe0c999ca58ac17c8839b4",
+  "api_hashes": {
+    "platform": "0d99d1b9b85b2efab91a39d6fc325bb6d56fd524",
+    "universal": "ed1dfa5ff8a041241f8fb72eb7454811f358f0d3"
+  },
+  "baseline_api_hash_match": false,
+  "role": "Public-source build control; not a proven Steam-compatible replacement"
+}

@@ -3333,7 +3333,7 @@ struct ContentView: View {
             // ORDERING MATTERS: our task-port claim installs at wine's first thread
             // setup, which is AFTER this point, so this BRK still reaches StikDebug.
             // Flip to false to A/B against the old attached-for-the-whole-run behaviour.
-            let earlyDetach = true
+            let earlyDetach = false
             if earlyDetach, pool != nil {
                 let dt0 = CFAbsoluteTimeGetCurrent()
                 StikJITHelper.detachDebugger()

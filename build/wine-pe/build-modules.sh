@@ -16,6 +16,14 @@
 #                                  modules import them)
 #   cryptsp                        Xal.Unity (Ori and the Will of the Wisps)
 #                                  delay-loads SystemFunction032 from it
+#   rsaenh, dssenh                 CryptoAPI providers used by Steam64; an
+#                                  i386-only copy cannot serve an ARM64EC session
+#   ncrypt, wsock32, mswsock        Steam's updated video64/libavformat and UI;
+#                                  wsock32 forwards its extension API to mswsock
+#   msimg32, opengl32, glu32,       Steam vgui2 imports these GUI/session DLLs;
+#   wtsapi32, dwmapi                packaging does not establish host GL support
+#   winhttp, jsproxy, dwrite,       Steam CEF's HTTP/font and SSPI modules
+#   schannel                       (WinHTTP imports the PAC/proxy frontend)
 #   xaudio2_7                      the prefix registers CLSID_XAudio2 (2.7) at
 #                                  system32\xaudio2_7.dll
 # and GAME_MODULES below: builtins games or their installers import that the
@@ -81,7 +89,9 @@ GAME_MODULES="msvcr70 msvcr71 msvcr80 msvcr90 msvcr100 msvcrt20 msvcrt40 msvcirt
     xapofx1_1 xapofx1_2 xapofx1_3 xapofx1_4
     d2d1 wmvcore winegstreamer netprofm"
 # shellcheck disable=SC2086 # the list is split on purpose
-[ $# -gt 0 ] || set -- cryptsp d3dx11_43 msvcp110 msvcr110 xaudio2_7 $GAME_MODULES
+[ $# -gt 0 ] || set -- cryptsp rsaenh dssenh ncrypt wsock32 mswsock \
+    msimg32 opengl32 glu32 wtsapi32 dwmapi winhttp jsproxy dwrite schannel \
+    d3dx11_43 msvcp110 msvcr110 xaudio2_7 $GAME_MODULES
 [ -x "$STRIP" ] || { echo "llvm-mingw not found at $TC (docs/BUILDING.md)" >&2; exit 1; }
 
 targets=()
@@ -160,3 +170,6 @@ done
 case " $* " in
     *" wmvcore "*|*" winegstreamer "*) python3 "$R/tools/check-wine-media-dlls.py" "$DEST" ;;
 esac
+# For a complete payload farm, verify CryptoAPI packaging with:
+# python3 tools/check-wine-crypto-dlls.py app/Madeira/arm64ec-windows
+# A DEST staging directory may intentionally contain only the selected modules.

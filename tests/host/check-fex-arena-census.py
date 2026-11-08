@@ -162,4 +162,12 @@ with tempfile.TemporaryDirectory(prefix='fex-arena-census-') as temp:
             assert len(result.strip().splitlines()) == 34
         if case == 7:
             assert 'failed_range=0x7d00008000..0x7d00010000' in summary
-print('PASS: live census clipping, committed accounting, alignment, overlaps, overflow, bucket/output cap and failure-only integration')
+    # The opt-in dump precedes the summary: validate clipped LIVE view ranges.
+    env = dict(os.environ, MADEIRA_FEX_VIEW_LOG="1")
+    result = subprocess.check_output([str(exe), "2"], text=True, env=env)
+    views = [line for line in result.splitlines() if line.startswith("[fex-view]")]
+    assert len(views) == 3
+    assert "base=0x7d00000000 size=0x2000 flags=0x3 committed=0x1000" in views[0]
+    assert "base=0x7d00005000 size=0x2000 flags=0x23 committed=0x1000" in views[1]
+    assert "base=0x7d0000f000 size=0x1000 flags=0x3 committed=0x1000" in views[2]
+print('PASS: live census accounting and opt-in clipped view dump; original output cap preserved')

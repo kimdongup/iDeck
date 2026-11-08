@@ -49,6 +49,44 @@ extern kern_return_t mach_vm_protect(vm_map_t, mach_vm_address_t, mach_vm_size_t
 #define VM_LEDGER_FLAG_NO_FOOTPRINT (1 << 0)
 #endif
 
+#include "../../build/wow_va_probe.h"
+uint64_t madeira_wow_early_base = 0;
+uint64_t madeira_wow_early_length = 0;
+
+static int jit_wow_next_region(void *opaque, uint64_t query, uint64_t *base, uint64_t *size)
+{
+    vm_address_t address = (vm_address_t)query;
+    vm_size_t vmsize = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object_name = MACH_PORT_NULL;
+    kern_return_t kr = vm_region_64(mach_task_self(), &address, &vmsize,
+                                    VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
+                                    &count, &object_name);
+    if (object_name != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object_name);
+    if (kr != KERN_SUCCESS) return 0;
+    *base = (uint64_t)address;
+    *size = (uint64_t)vmsize;
+    return 1;
+}
+
+struct wow_va_probe_stats jit_wow_va_probe(const char *option)
+{
+    uint64_t top = 0x8000000000ULL;
+    struct task_vm_info vm_info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vm_info, &count) == KERN_SUCCESS) {
+        top = (uint64_t)vm_info.max_address;
+    }
+    return wow_va_probe_scan(top, WOW_VA_LOWER_BOUND, top, jit_wow_next_region, NULL);
+}
+
+int jit_wow_early_hold_try(void)
+{
+    return 0;
+}
+
+
 // Private Mach API declarations
 extern kern_return_t mach_memory_entry_ownership(
     mach_port_t mem_entry,
@@ -930,9 +968,9 @@ static struct ideck_cef64_slot ideck_cef64_compact_slots[17];
 static struct ideck_cef64_slot ideck_cef64_tail_nine_slots[17];
 static struct ideck_cef64_slot ideck_cef64_tail_twelve_slots[20];
 static int ideck_cef64_standalone_kind;
-int madeira_cef64_hold_state(void) { return __atomic_load_n(&ideck_cef64_hold_status, __ATOMIC_ACQUIRE); }
-int madeira_cef64_standalone_layout(void) { return madeira_cef64_hold_state() == 1 && ideck_cef64_standalone_kind; }
-int madeira_cef64_hold_get(unsigned slot, uint64_t *base, uint64_t *size)
+__attribute__((visibility("default"), used)) int madeira_cef64_hold_state(void) { return __atomic_load_n(&ideck_cef64_hold_status, __ATOMIC_ACQUIRE); }
+__attribute__((visibility("default"), used)) int madeira_cef64_standalone_layout(void) { return madeira_cef64_hold_state() == 1 && ideck_cef64_standalone_kind; }
+__attribute__((visibility("default"), used)) int madeira_cef64_hold_get(unsigned slot, uint64_t *base, uint64_t *size)
 {
     if (slot >= ideck_cef64_active_count || madeira_cef64_hold_state() != 1 ||
         !(__atomic_load_n(&ideck_cef64_held_mask, __ATOMIC_ACQUIRE) & (1u << slot))) return 0;
@@ -940,14 +978,14 @@ int madeira_cef64_hold_get(unsigned slot, uint64_t *base, uint64_t *size)
     *size = ideck_cef64_active_slots[slot].size;
     return 1;
 }
-int madeira_cef64_hold_claim(unsigned slot)
+__attribute__((visibility("default"), used)) int madeira_cef64_hold_claim(unsigned slot)
 {
     uint64_t base, size;
     if (!madeira_cef64_hold_get(slot, &base, &size)) return 0;
     unsigned bit = 1u << slot;
     return !(__atomic_fetch_or(&ideck_cef64_claimed_mask, bit, __ATOMIC_ACQ_REL) & bit);
 }
-void madeira_cef64_hold_unclaim(unsigned slot)
+__attribute__((visibility("default"), used)) void madeira_cef64_hold_unclaim(unsigned slot)
 {
     if (slot < ideck_cef64_active_count) __atomic_fetch_and(&ideck_cef64_claimed_mask, ~(1u << slot), __ATOMIC_ACQ_REL);
 }
@@ -969,151 +1007,41 @@ __attribute__((constructor(99), used)) static void ideck_cef64_boot_holds(void)
     int requested=ideck_steam64_selected(runtime,argc,argv);
     if (!option || strcmp(option, "1")) return;
     if (!requested) return;
-    const char *split = getenv("MADEIRA_CEF64_SPLIT_LAYOUT");
-    if (split && !strcmp(split, "1")) {
-        ideck_cef64_active_slots = ideck_cef64_split_slots;
-        ideck_cef64_active_count = 8;
-    }
-    const char *near = getenv("MADEIRA_CEF64_NEAR_CODE");
-    if (ideck_cef64_active_count == 8 && near && !strcmp(near, "1")) {
-        ideck_cef64_active_slots = ideck_cef64_near_slots;
-        ideck_cef64_active_count = 9;
-    }
-    const char *crash = getenv("MADEIRA_CEF64_CRASH_POOLS");
-    if (ideck_cef64_active_count == 9 && crash && !strcmp(crash, "1")) {
-        ideck_cef64_active_slots = ideck_cef64_crash_slots;
-        ideck_cef64_active_count = 11;
-    }
-    const char *tables = getenv("MADEIRA_CEF64_MULTI_TABLES");
-    if (ideck_cef64_active_count == 11 && tables && !strcmp(tables, "1")) {
-        ideck_cef64_active_slots = ideck_cef64_table_slots;
-        ideck_cef64_active_count = 13;
-    }
-    const char *wide = getenv("MADEIRA_CEF64_WIDE_ARENA");
-    const char *standalone = getenv("MADEIRA_CEF64_STANDALONE_LAYOUT");
-    const char *external = getenv("MADEIRA_CEF64_EXTERNAL_CRASHPAD");
-    if (ideck_cef64_active_count == 13 && standalone && !strcmp(standalone, "1")) {
-        if (!external || strcmp(external, "1") || (wide && !strcmp(wide, "1"))) {
-            __atomic_store_n(&ideck_cef64_hold_status, -1, __ATOMIC_RELEASE);
-            dprintf(2, "[cef64-owned] standalone layout requires real external reporting and no wide layout; refused\n");
-            return;
-        }
-        ideck_cef64_active_slots = ideck_cef64_standalone_slots;
-        ideck_cef64_active_count = 11;
-        ideck_cef64_standalone_kind = 1;
-    }
-    const char *four = getenv("MADEIRA_CEF64_FOUR_TABLES");
-    if (four && !strcmp(four,"1")) {
-        if (!ideck_cef64_standalone_kind) {
-            __atomic_store_n(&ideck_cef64_hold_status,-1,__ATOMIC_RELEASE);
-            dprintf(2,"[cef64-owned] fourth table requires actual standalone reporting layout; refused\n");
-            return;
-        }
-        ideck_cef64_fill_four_slots(ideck_cef64_four_slots);
-        ideck_cef64_active_slots=ideck_cef64_four_slots;
-        ideck_cef64_active_count=12;
-    }
-    const char *six=getenv("MADEIRA_CEF64_SIX_TABLES");
-    if(six && !strcmp(six,"1")){
-        if(!ideck_cef64_standalone_kind || ideck_cef64_active_count!=12){
-            __atomic_store_n(&ideck_cef64_hold_status,-1,__ATOMIC_RELEASE);
-            dprintf(2,"[cef64-owned] six tables require explicit four-table standalone layout; refused\n");
-            return;
-        }
-        ideck_cef64_fill_six_slots(ideck_cef64_six_slots);
-        ideck_cef64_active_slots=ideck_cef64_six_slots;
-        ideck_cef64_active_count=14;
-    }
-
-    const char *tail=getenv("MADEIRA_CEF64_TABLES_FROM_ARENA");
-    if(tail && !strcmp(tail,"1")){
-        if(!ideck_cef64_standalone_kind || ideck_cef64_active_count!=14){
-            __atomic_store_n(&ideck_cef64_hold_status,-1,__ATOMIC_RELEASE);
-            dprintf(2,"[cef64-owned] arena-tail tables require explicit six-table standalone layout; refused\n");
-            return;
-        }
-        ideck_cef64_fill_tail_six_slots(ideck_cef64_six_slots);
-    }
-
-    const char *seven=getenv("MADEIRA_CEF64_SEVENTH_TABLE");
-    if(seven && !strcmp(seven,"1")){
-        if(!ideck_cef64_standalone_kind || ideck_cef64_active_count!=14 || !tail || strcmp(tail,"1")){
-            __atomic_store_n(&ideck_cef64_hold_status,-1,__ATOMIC_RELEASE);
-            dprintf(2,"[cef64-owned] seventh table requires explicit arena-tail six-table layout; refused\n");
-            return;
-        }
-        ideck_cef64_fill_seven_slots(ideck_cef64_seven_slots);
-        ideck_cef64_active_slots=ideck_cef64_seven_slots;
-        ideck_cef64_active_count=15;
-    }
-
-    const char *eight=getenv("MADEIRA_CEF64_EIGHTH_TABLE");
-    if(eight && !strcmp(eight,"1")){
-        if(!ideck_cef64_standalone_kind || ideck_cef64_active_count!=15){
-            __atomic_store_n(&ideck_cef64_hold_status,-1,__ATOMIC_RELEASE);
-            dprintf(2,"[cef64-owned] eighth table requires explicit seven-table arena-tail layout; refused\n");
-            return;
-        }
-        ideck_cef64_fill_eight_slots(ideck_cef64_eight_slots);
-        ideck_cef64_active_slots=ideck_cef64_eight_slots;
-        ideck_cef64_active_count=16;
-    }
-    const char *compact=getenv("MADEIRA_CEF64_COMPACT_SOURCE_POOLS");
-    const char *tail_nine=getenv("MADEIRA_CEF64_NINTH_TAIL_TABLE");
-    if(tail_nine && !strcmp(tail_nine,"1")){
-        if(!ideck_cef64_standalone_kind || ideck_cef64_active_count!=16 ||
-           (compact && !strcmp(compact,"1"))){
-            __atomic_store_n(&ideck_cef64_hold_status,-1,__ATOMIC_RELEASE);
-            dprintf(2,"[cef64-owned] ninth tail table requires explicit noncompact eight-table layout; refused\n");
-            return;
-        }
-        ideck_cef64_fill_tail_nine_slots(ideck_cef64_tail_nine_slots);
-        ideck_cef64_active_slots=ideck_cef64_tail_nine_slots;
-        ideck_cef64_active_count=17;
-    }
-    if(compact && !strcmp(compact,"1")){
-        if(!ideck_cef64_standalone_kind || ideck_cef64_active_count!=16){
-            __atomic_store_n(&ideck_cef64_hold_status,-1,__ATOMIC_RELEASE);
-            dprintf(2,"[cef64-owned] compact source pools require explicit eight-table standalone layout; refused\n");
-            return;
-        }
-        ideck_cef64_fill_compact_slots(ideck_cef64_compact_slots);
-        ideck_cef64_active_slots=ideck_cef64_compact_slots;
-        ideck_cef64_active_count=17;
-    }
-    const char *twelve=getenv("MADEIRA_CEF64_TWELVE_TABLES");
-    if(twelve && !strcmp(twelve,"1")){
-        if(!tail_nine || strcmp(tail_nine,"1") || ideck_cef64_active_count!=17 ||
-           (compact && !strcmp(compact,"1"))){
-            __atomic_store_n(&ideck_cef64_hold_status,-1,__ATOMIC_RELEASE);
-            dprintf(2,"[cef64-owned] twelve tables require explicit noncompact ninth-tail layout; refused\n");
-            return;
-        }
-        ideck_cef64_fill_tail_twelve_slots(ideck_cef64_tail_twelve_slots);
-        ideck_cef64_active_slots=ideck_cef64_tail_twelve_slots;
-        ideck_cef64_active_count=20;
-    }
-    if (ideck_cef64_active_count == 13 && wide && !strcmp(wide, "1")) {
-        ideck_cef64_fill_wide_slots(ideck_cef64_wide_slots);
-        ideck_cef64_active_slots = ideck_cef64_wide_slots;
-    }
+    /* In Build 185, ideck_cef64_slots (6 slots, all <= 0x7180000000) is the canonical layout */
+    ideck_cef64_active_slots = ideck_cef64_slots;
+    ideck_cef64_active_count = 6;
+    ideck_cef64_standalone_kind = 1;
     __atomic_store_n(&ideck_cef64_hold_status, -1, __ATOMIC_RELEASE);
+    uint64_t max_address = 0x8000000000ULL;
+    struct task_vm_info vm_info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vm_info, &count) == KERN_SUCCESS) {
+        max_address = (uint64_t)vm_info.max_address;
+    }
+    unsigned held = 0;
     for (unsigned i = 0; i < ideck_cef64_active_count; ++i) {
+        if (ideck_cef64_active_slots[i].base + ideck_cef64_active_slots[i].size > max_address) {
+            continue;
+        }
         vm_address_t actual = ideck_cef64_active_slots[i].base;
         kern_return_t kr = vm_map(mach_task_self(), &actual, ideck_cef64_active_slots[i].size, 0,
             VM_FLAGS_FIXED, MEMORY_OBJECT_NULL, 0, FALSE, VM_PROT_NONE,
             i == 3 ? VM_PROT_ALL : VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_NONE);
         if (kr != KERN_SUCCESS || actual != ideck_cef64_active_slots[i].base) {
             if (kr == KERN_SUCCESS) vm_deallocate(mach_task_self(), actual, ideck_cef64_active_slots[i].size);
-            for (unsigned j = 0; j < i; ++j)
-                vm_deallocate(mach_task_self(), ideck_cef64_active_slots[j].base, ideck_cef64_active_slots[j].size);
+            for (unsigned j = 0; j < i; ++j) {
+                if (ideck_cef64_active_slots[j].base + ideck_cef64_active_slots[j].size <= max_address)
+                    vm_deallocate(mach_task_self(), ideck_cef64_active_slots[j].base, ideck_cef64_active_slots[j].size);
+            }
             dprintf(2, "[cef64-owned] boot reservation failed slot=%u kr=%d; no layout adopted\n", i, kr);
             return;
         }
+        held |= (1u << i);
     }
-    __atomic_store_n(&ideck_cef64_held_mask, (1u << ideck_cef64_active_count) - 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&ideck_cef64_held_mask, held, __ATOMIC_RELEASE);
     __atomic_store_n(&ideck_cef64_hold_status, 1, __ATOMIC_RELEASE);
-    dprintf(2, "[cef64-owned] exact disjoint native regions=%u held; no guest claims yet\n", ideck_cef64_active_count);
+    dprintf(2, "[cef64-owned] exact disjoint native regions=%u held (held_mask=0x%x, max_addr=0x%llx); no guest claims yet\n",
+            ideck_cef64_active_count, held, (unsigned long long)max_address);
 }
 /* Explicit read-only timing discriminator. All mappings are NONE, no-overwrite,
  * released by the existing bounded probe. Never active on ordinary launch. */

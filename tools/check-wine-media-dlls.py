@@ -10,7 +10,7 @@ import sys
 
 
 class PE:
-    def __init__(self, path):
+    def __init__(self, path, machines=(0x8664, 0xa641, 0xa64e)):
         self.data = Path(path).read_bytes()
         if self.data[:2] != b'MZ':
             raise ValueError('missing DOS header')
@@ -20,7 +20,7 @@ class PE:
         machine, sections = self.unpack('<HH', pe + 4)
         optional_size, flags = self.unpack('<HH', pe + 20)
         optional = pe + 24
-        if machine not in (0x8664, 0xa641, 0xa64e) or not flags & 0x2000:
+        if machine not in machines or not flags & 0x2000:
             raise ValueError('expected a 64-bit x64/ARM64EC/ARM64X DLL')
         if optional_size < 224 or self.unpack('<H', optional)[0] != 0x20b:
             raise ValueError('missing PE32+ optional header')
@@ -91,6 +91,26 @@ class PE:
                 raise ValueError('unsupported VA-based delay import')
             result.add(self.name(self.unpack('<I', descriptor + name_offset)[0]).lower())
         raise ValueError('unterminated import directory')
+
+    def forwarded_modules(self):
+        """Export forwarders are dependencies even without import descriptors."""
+        rva, size = self.directories[0]
+        if not rva or size < 40:
+            return set()
+        fields = self.unpack('<IIHHIIIIIII', self.offset(rva, 40))
+        count, addresses = fields[6], fields[8]
+        if count > 65536:
+            raise ValueError('invalid export count')
+        modules = set()
+        for i in range(count):
+            address = self.unpack('<I', self.offset(addresses + i * 4, 4))[0]
+            if rva <= address < rva + size:
+                module, separator, symbol = self.name(address).rpartition('.')
+                if not separator or not module or not symbol:
+                    raise ValueError('invalid export forwarder')
+                module = module.lower()
+                modules.add(module if module.endswith('.dll') else module + '.dll')
+        return modules
 
 
 def check(bundle):

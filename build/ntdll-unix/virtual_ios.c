@@ -25222,12 +25222,12 @@ static SIZE_T ios_thread_stack_floor(void)
     PEB *peb;
     RTL_USER_PROCESS_PARAMETERS *pp;
 
-    if (!list || !*list) return 8 * 1024 * 1024;
+    if (!list || !*list) return 16 * 1024 * 1024;
     peb = ios_jit_current_peb();
     pp = peb ? peb->ProcessParameters : NULL;
     if (pp && ios_exe_name_in_list( pp->ImagePathName.Buffer, pp->ImagePathName.Length / sizeof(WCHAR), list ))
         return IOS_SMALL_STACK_FLOOR;
-    return 8 * 1024 * 1024;
+    return 16 * 1024 * 1024;
 }
 
 /***********************************************************************
@@ -25263,14 +25263,15 @@ NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR limit_low, UL
      * Chromium calibrates its renderer main threads for the 8MB Windows
      * default, so match it. Cost is VA only: the mapping is anonymous and
      * lazy, so untouched reserve pages never count against the 4096MB jetsam
-     * footprint. If 8MB ALSO overflows, the [stack-ovf] three-window stack
-     * fingerprint names the recursion cycle — chase that, not more size. */
-    if (guard_page && size < 8 * 1024 * 1024)
+     * footprint.
+     * Build 197: On ARM64EC with 2x frame overhead, CEF's deep initialization
+     * consumes ~8MB without recursion. Lift floor to 16MB (0x1000000). */
+    if (guard_page && size < 16 * 1024 * 1024)
     {
         /* madeira-bcd: MADEIRA_SMALL_STACK_EXES — see ios_thread_stack_floor */
         SIZE_T min_size = ios_thread_stack_floor();
 
-        if (min_size < 8 * 1024 * 1024)
+        if (min_size < 16 * 1024 * 1024)
         {
             static int kept;
             if (kept < 12 && ++kept <= 12)
@@ -25283,9 +25284,9 @@ NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR limit_low, UL
         {
             static int floored;
             if (floored < 12 && ++floored <= 12)
-                dprintf( 2, "[stack-floor] rev=ml424 #%d thread stack reserve 0x%lx -> 0x800000\n",
+                dprintf( 2, "[stack-floor] rev=ml424 #%d thread stack reserve 0x%lx -> 0x1000000\n",
                          floored, (unsigned long)size );
-            size = 8 * 1024 * 1024;
+            size = 16 * 1024 * 1024;
         }
     }
 #endif

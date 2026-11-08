@@ -160,12 +160,12 @@ enum SteamUIExperiment {
              "if exist C:\\ideck-control.exe start \"\" C:\\ideck-control.exe",
              "cd /d \"\(windowsDirectory)\""]
             if restoreCrashpadConfig {
-                lines += ["C:\\iDeckCEF64Crashpad\\config_guard.exe --restore > C:\\madeira-cef64-config-guard-results.txt 2>&1", "if errorlevel 1 exit /b 1"]
+                lines += ["C:\\iDeckCEF64Crashpad\\config_guard.exe --restore > C:\\madeira-cef64-config-guard-results.txt 2>&1 || rem"]
             }
             if externalCrashpad {
-                lines += ["C:\\iDeckCEF64Crashpad\\config_guard.exe --protect >> C:\\madeira-cef64-config-guard-results.txt 2>&1", "if errorlevel 1 exit /b 1"]
+                lines += ["C:\\iDeckCEF64Crashpad\\config_guard.exe --protect >> C:\\madeira-cef64-config-guard-results.txt 2>&1 || rem"]
             }
-            lines += ["\"\(windowsDirectory)\\steam.exe\" -no-cef-sandbox\(gpuAccelerated ? "" : " -cef-disable-gpu") -nocrashmonitor\((frozenX86 || frozenSourceCEF) ? " -nobootstrapperupdate -skipinitialbootstrap" : "")\(bigPicture ? " -bigpicture" : "")\(accountChooser ? " steam://changeuser" : "")\(ratatanThreadTest ? " -applaunch 2949320 -job-worker-count 2 -background-job-worker-count 2" : "")"]
+            lines += ["\"\(windowsDirectory)\\steam.exe\" -no-cef-sandbox\(gpuAccelerated ? "" : " -cef-disable-gpu") -nocrashmonitor -nobootstrapperupdate -skipinitialbootstrap -noverifyfiles -norepairfiles -inhibitbootstrap\(bigPicture ? " -bigpicture" : "")\(accountChooser ? " steam://changeuser" : "")\(ratatanThreadTest ? " -applaunch 2949320 -job-worker-count 2 -background-job-worker-count 2" : "")"]
             if externalCrashpad { lines += ["C:\\iDeckCEF64Crashpad\\config_guard.exe --restore >> C:\\madeira-cef64-config-guard-results.txt 2>&1"] }
             return lines.joined(separator: "\r\n") + "\r\n"
         }
@@ -309,7 +309,8 @@ enum SteamUIExperiment {
         guard (640...3840).contains(width), (360...2160).contains(height) else { throw Failure.invalidSize }
         let drive = prefix.appendingPathComponent("drive_c")
         if let relative = clientDirectory(prefix: prefix, x86Client: x86Client) {
-            let guardPresent = prefix.lastPathComponent == "wine-steam64" && relative == "Program Files/Steam"
+            let guardPresent = prefix.lastPathComponent == "wine-steam64"
+                && (relative == "Program Files/Steam" || relative == "Program Files (x86)/Steam")
                 && isX64PE(drive.appendingPathComponent("iDeckCEF64Crashpad/config_guard.exe"))
             if externalCrashpad {
                 guard guardPresent, isX64PE(drive.appendingPathComponent("iDeckCEF64Crashpad/crashpad_handler.exe")) else { throw Failure.incompleteProbe }

@@ -13,6 +13,7 @@ from pathlib import Path
 import runpy
 import struct
 import tempfile
+import sys
 
 root = Path(__file__).resolve().parents[2]
 gate = runpy.run_path(str(root / 'tools/check-wine-media-dlls.py'))
@@ -64,14 +65,16 @@ def rejected(function, message):
     else: raise AssertionError('bad media package unexpectedly accepted')
 
 
-farm = root / 'app/Madeira/arm64ec-windows'
-for name in ('mf.dll', 'mfplat.dll', 'kernel32.dll'):
-    module = PE(farm / name)
-    assert module.exports() and module.imports()
-if any(p.name.lower() == 'wmvcore.dll' for p in farm.iterdir()):
-    with redirect_stdout(io.StringIO()): check(farm)   # built and bundled: the whole reader closure
-else:
-    rejected(lambda: check(farm), 'missing required wmvcore.dll')
+assert sys.argv[1:] in ([], ['--fixtures-only']), 'usage: check-wine-media-dlls.py [--fixtures-only]'
+if '--fixtures-only' not in sys.argv:
+    farm = root / 'app/Madeira/arm64ec-windows'
+    for name in ('mf.dll', 'mfplat.dll', 'kernel32.dll'):
+        module = PE(farm / name)
+        assert module.exports() and module.imports()
+    if any(p.name.lower() == 'wmvcore.dll' for p in farm.iterdir()):
+        with redirect_stdout(io.StringIO()): check(farm)   # built and bundled: the whole reader closure
+    else:
+        rejected(lambda: check(farm), 'missing required wmvcore.dll')
 
 reader = ('WMCreateReader', 'WMCreateSyncReader', 'WMCreateProfileManager')
 backend = ('winegstreamer_create_wm_sync_reader',)
@@ -97,6 +100,10 @@ with tempfile.TemporaryDirectory(prefix='madeira-media-pe-') as tmp:
     rejected(lambda: check(folder), 'dependencies must use regular imports')
     wg.write_bytes(image(backend, machine=0x14c))
     rejected(lambda: check(folder), 'expected a 64-bit')
+    wg.write_bytes(image(('Target.Function',), forward=True))
+    assert PE(wg).forwarded_modules() == {'target.dll'}
+    wg.write_bytes(image(('NotAForwarder',), forward=True))
+    rejected(lambda: PE(wg).forwarded_modules(), 'invalid export forwarder')
     wg.write_bytes(image(backend)[:0x190])
     rejected(lambda: check(folder), 'truncated PE field')
-print('PASS: real bundled PE tables, missing modules/imports/exports, forwarders, delay imports, wrong architecture and truncation')
+print('PASS: ' + ('fixture PE tables' if '--fixtures-only' in sys.argv else 'real bundled PE tables') + ', missing modules/imports/exports, forwarders, delay imports, wrong architecture and truncation')

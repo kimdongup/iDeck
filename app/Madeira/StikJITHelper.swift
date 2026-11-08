@@ -155,13 +155,14 @@ enum StikJITHelper {
     private static let scLayout2HoldSize: vm_size_t = 0x100000000
     private static var scHoldTaken = false
 
-    /// The RW alias hint: 0x7900000000 with the hold taken for layout 2, else the
-    /// usual 0x7000000000.
+    /// The RW alias hint: 0x7900000000 with the hold taken for layout 2, else
+    /// 0x7008000000 so the 4 GiB aligned boundary at 0x7000000000 remains free
+    /// for Oilpan CagedHeap (128 MiB).
     private static func rwAliasHint() -> vm_address_t {
         if scHoldTaken { return scLayout2Alias }
         let v = (MadeiraConfig.gameValue("env.MADEIRA_SC_PA_POOLS") ?? MadeiraConfig.get("env.MADEIRA_SC_PA_POOLS") ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard v.hasPrefix("2") else { return 0x7000000000 }
+        guard v.hasPrefix("2") else { return 0x7008000000 }
         var a = scLayout2Hold
         let kr = vm_allocate(mach_task_self_, &a, scLayout2HoldSize, 0 /* VM_FLAGS_FIXED */)
         guard kr == KERN_SUCCESS, a == scLayout2Hold else {
@@ -180,7 +181,7 @@ enum StikJITHelper {
             LogStore.shared.log(String(format: "[sc-cef] layout 2: [0x%lx,+4GB) is not free (kr=%d; first region 0x%lx+0x%lx prot=%d/%d, region kr=%d) -- usual RW alias placement",
                                        Int(scLayout2Hold), kr, Int(ra), Int(rs), Int(info.protection), Int(info.max_protection), rkr),
                                 level: .error)
-            return 0x7000000000
+            return 0x7008000000
         }
         _ = vm_protect(mach_task_self_, a, scLayout2HoldSize, 0, VM_PROT_NONE)
         scHoldTaken = true

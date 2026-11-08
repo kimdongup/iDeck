@@ -1,5 +1,10 @@
 # Steam64 on iPhone — Build 99–152 investigation and engineering handoff
 
+**Later investigation, 2026-11-06 HST:** source rebuilds and device tests now reach
+[Build184](STEAM64_BUILD184_COMPACT_CALLRET_2026-11-06.md), following
+[Build181–183](STEAM64_BUILDS181_183_SOURCE_RESULTS_2026-11-06.md).
+The original Build152 status below is historical. Steam login/UI success remains unverified.
+
 **Status as of 2026-11-04 (HST):** **BLOCKED / diagnostic Build152 IPA built; device execution not yet reported.**  
 **Scope:** `kimdongup/iDeck` / local Madeira + Wine + FEX + ARM64EC, on-device Windows Steam64 bootstrap.  
 **Related:** [iDeck technical status](IDECK.md), [building guide](BUILDING.md), [Steam recovery](IDECK_STEAM_RECOVERY.md).  

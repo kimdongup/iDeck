@@ -25,6 +25,7 @@
 #ifdef __aarch64__
 
 #include "config.h"
+#include "../../FEX/FEXCore/include/FEXCore/Debug/CallRetStackGeometry.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -1483,6 +1484,16 @@ static __thread int ios_neon_valid = 1;
  * of the encoding masks at any caller, so control flow is unchanged -- an
  * unreadable PC now behaves exactly like an unrecognised instruction instead of
  * wedging the handler. */
+#include "ios_cef_fatal_site.h"
+
+static int ios_cef_fatal_read_memory( uint64_t address, void *out, size_t size, void *opaque )
+{
+    mach_vm_size_t got = 0;
+    (void)opaque;
+    return mach_vm_read_overwrite( mach_task_self(), address, size,
+                                  (mach_vm_address_t)out, &got ) == KERN_SUCCESS && got == size;
+}
+
 static int ios_fault_read_insn( uint64_t fault_pc, uint32_t *out )
 {
     mach_vm_size_t got = 0;
@@ -2001,6 +2012,15 @@ static void *ios_mach_exception_thread( void *arg )
                             (unsigned long long)grip, (unsigned long long)x28v, ok);
                     if (ok)
                     {
+                        const char *trace = getenv( "MADEIRA_CEF_FATAL_TRACE" );
+                        if (trace && !strcmp( trace, "1" ))
+                        {
+                            struct ios_cef_fatal_site site;
+                            if (ios_cef_fatal_site_read( grip, gregs[6], ios_cef_fatal_read_memory, NULL, &site ))
+                                dprintf( STDERR_FILENO,
+                                         "[cef-fatal-site] file=%s line=%u severity=%u object=0x%llx rev=cef126\n",
+                                         site.file, site.line, site.severity, (unsigned long long)gregs[6] );
+                        }
                         /* ml578: the GUEST register file — 16 entries, FEX order.
                          * Printed separately and explicitly labelled; the host ARM
                          * dump below is a different thing and was previously being
@@ -7553,9 +7573,11 @@ static void ios_log_guest_exception( const char *via, const EXCEPTION_RECORD *re
 {
     static volatile int exc_logged = 0;
     int n = __sync_add_and_fetch(&exc_logged, 1);
+    TEB *teb = NtCurrentTeb();
+    unsigned int tid = teb ? (unsigned int)(ULONG_PTR)teb->ClientId.UniqueThread : 0;
     if (n > 80) return;
     dprintf(2, "[exc-disp] %s tid=%04x code=%08x flags=%x addr=%p pc=%llx nparams=%u p0=%llx p1=%llx\n",
-            via, (unsigned int)(ULONG_PTR)NtCurrentTeb()->ClientId.UniqueThread,
+            via, tid,
             (unsigned int)rec->ExceptionCode, (unsigned int)rec->ExceptionFlags,
             rec->ExceptionAddress, (unsigned long long)pc, (unsigned int)rec->NumberParameters,
             rec->NumberParameters > 0 ? (unsigned long long)rec->ExceptionInformation[0] : 0,
@@ -7681,6 +7703,299 @@ static int ios_emulate_unaligned_guest_access(ucontext_t *ctx, uint32_t insn, ui
 static int ios_native_unaligned_emulate( ucontext_t *ctx, uint32_t insn, uintptr_t addr, uint64_t pc );
 static uint64_t ios_app_text_lo, ios_app_text_hi;
 
+/* ml426: pool alias first, then a raw PE VA, then a host image. The module
+ * name is copied out of ios_pe_module_name's static buffer. Returns 1 when
+ * a module or host symbol was named. */
+static int ios_ovf_fmt_addr( uint64_t addr, char *dst, size_t dst_sz )
+{
+    extern uint64_t ios_jit_reverse_translate( uint64_t addr, uint64_t *module_base );
+    extern unsigned long long ios_jit_module_base_for_va( unsigned long long va, unsigned long long *size_out );
+    uint64_t mod = 0, pe;
+    unsigned long long msz = 0, mbase;
+    Dl_info di;
+
+    if (!dst || dst_sz < 8) return 0;
+    pe = ios_jit_reverse_translate( addr, &mod );
+    if (pe && mod)
+    {
+        const char *nm = ios_pe_module_name( mod );
+        snprintf( dst, dst_sz, "%.48s+0x%llx", nm ? nm : "?",
+                  (unsigned long long)(pe - mod) );
+        return 1;
+    }
+    mbase = ios_jit_module_base_for_va( addr, &msz );
+    if (mbase)
+    {
+        const char *nm = ios_pe_module_name( mbase );
+        snprintf( dst, dst_sz, "%.48s+0x%llx", nm ? nm : "?",
+                  (unsigned long long)(addr - mbase) );
+        return 1;
+    }
+    if (dladdr( (void *)(uintptr_t)addr, &di ) && di.dli_fname)
+    {
+        const char *img = strrchr( di.dli_fname, '/' );
+        img = img ? img + 1 : di.dli_fname;
+        if (di.dli_sname)
+            snprintf( dst, dst_sz, "%.24s`%.40s+0x%llx", img, di.dli_sname,
+                      (unsigned long long)(addr - (uint64_t)(uintptr_t)di.dli_saddr) );
+        else
+            snprintf( dst, dst_sz, "%.32s+0x%llx", img,
+                      (unsigned long long)(addr - (uint64_t)(uintptr_t)di.dli_fbase) );
+        return 1;
+    }
+    snprintf( dst, dst_sz, "0x%llx", (unsigned long long)addr );
+    return 0;
+}
+
+/* Top-byte PAC / TBI. Leave a value already in the guest pointer window. */
+static uint64_t ios_ovf_canon( uint64_t v )
+{
+    uint64_t s;
+    if (v > 0x100000000ull && v < 0x80000000000ull) return v;
+    s = v & 0x0000ffffffffffffull;
+    if (s > 0x100000000ull && s < 0x80000000000ull) return s;
+    s = v & 0x0000007fffffffffull;
+    if (s > 0x100000000ull && s < 0x80000000000ull) return s;
+    return v;
+}
+
+static int ios_ovf_ptr( uint64_t v )
+{
+    return v > 0x100000000ull && v < 0x80000000000ull;
+}
+
+/* STATUS_STACK_OVERFLOW only. Mach x30 is wake's direct caller (the prologue
+ * does not write x30 before the faulting store). The saved pair for this
+ * frame is sp+0x870 (x29) and sp+0x878 (x30). KiUser's 0x4d0 frame is naked,
+ * so the stride scan looks for any repeating pointer rather than one slot. */
+static void ios_ovf_ml426( uint64_t pc, uint64_t sp, uint64_t lr, uintptr_t fault_addr,
+                           unsigned long long sb, unsigned long long da )
+{
+    char pc_n[96], lr_n[96], one_n[96];
+    uint64_t q;
+    mach_vm_size_t got;
+    kern_return_t kr;
+
+    ios_ovf_fmt_addr( ios_ovf_canon( pc ), pc_n, sizeof(pc_n) );
+    ios_ovf_fmt_addr( ios_ovf_canon( lr ), lr_n, sizeof(lr_n) );
+    dprintf( 2, "[stack-ovf] rev=ml426 pc=0x%llx %s sp=0x%llx x30=0x%llx %s\n",
+             (unsigned long long)pc, pc_n, (unsigned long long)sp,
+             (unsigned long long)lr, lr_n );
+
+    got = 0;
+    q = 0;
+    kr = mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)(sp + 0x878), 8,
+                                 (mach_vm_address_t)&q, &got );
+    if (kr == KERN_SUCCESS && got == 8)
+    {
+        ios_ovf_fmt_addr( ios_ovf_canon( q ), one_n, sizeof(one_n) );
+        dprintf( 2, "[stack-ovf] rev=ml426 saved@sp+0x878 x30=0x%llx %s\n",
+                 (unsigned long long)q, one_n );
+    }
+    else
+        dprintf( 2, "[stack-ovf] rev=ml426 saved@sp+0x878 unreadable kr=%d got=%llu\n",
+                 (int)kr, (unsigned long long)got );
+
+    got = 0;
+    q = 0;
+    kr = mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)(sp + 0x870), 8,
+                                 (mach_vm_address_t)&q, &got );
+    if (kr == KERN_SUCCESS && got == 8)
+    {
+        ios_ovf_fmt_addr( ios_ovf_canon( q ), one_n, sizeof(one_n) );
+        dprintf( 2, "[stack-ovf] rev=ml426 saved@sp+0x870 x29=0x%llx %s\n",
+                 (unsigned long long)q, one_n );
+    }
+
+    /* ml427: pc/sp/lr above are the faulting thread's registers, captured
+     * before delivery rewrites PC to KiUser and SP to the exception frame.
+     * Wake's prologue is `stp #-64` then `sub #0x840`, so its caller's SP
+     * is fault_sp+0x880. The ARM64EC entry thunk left the real return
+     * address in `stp x29, x30, [sp, #160]` (x30 at +0xa8) and then
+     * `blr x9`. Gate on the faulting store so a different overflow does
+     * not invent that offset. */
+    {
+        uint32_t insn = 0;
+        mach_vm_size_t igot = 0;
+        kern_return_t ikr = mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)pc, 4,
+                                                    (mach_vm_address_t)&insn, &igot );
+        if (ikr == KERN_SUCCESS && igot == 4 && insn == 0xf9001fff)
+        {
+            uint64_t entry = sp + 0x880;
+            uint64_t caller = 0;
+            int hi, nh = 0;
+            uint64_t win[36];
+            mach_vm_size_t wgot = 0;
+            kr = mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)(entry + 0xa8), 8,
+                                         (mach_vm_address_t)&caller, &got );
+            if (kr == KERN_SUCCESS && got == 8)
+            {
+                ios_ovf_fmt_addr( ios_ovf_canon( caller ), one_n, sizeof(one_n) );
+                dprintf( 2, "[stack-ovf] rev=ml427 thunk-x30 @sp+0x928 = 0x%llx %s\n",
+                         (unsigned long long)caller, one_n );
+            }
+            else
+                dprintf( 2, "[stack-ovf] rev=ml427 thunk-x30 @sp+0x928 unreadable kr=%d got=%llu\n",
+                         (int)kr, (unsigned long long)got );
+            if (mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)entry, sizeof(win),
+                                        (mach_vm_address_t)win, &wgot ) == KERN_SUCCESS && wgot >= 8)
+            {
+                for (hi = 0; hi < (int)(wgot / 8) && nh < 8; hi++)
+                {
+                    uint64_t v = ios_ovf_canon( win[hi] );
+                    char tmp[96];
+                    if (!ios_ovf_ptr( v )) continue;
+                    ios_ovf_fmt_addr( v, tmp, sizeof(tmp) );
+                    dprintf( 2, "[stack-ovf] rev=ml427 entry+%#x raw=0x%llx %s\n",
+                             hi * 8, (unsigned long long)win[hi], tmp );
+                    nh++;
+                }
+            }
+        }
+        else
+            dprintf( 2, "[stack-ovf] rev=ml427 thunk slot skipped insn=0x%x\n", insn );
+    }
+
+    if (!(sb > da && sb - da <= 0x4000000 && (unsigned long long)fault_addr > da &&
+          (unsigned long long)fault_addr < sb))
+    {
+        dprintf( 2, "[stack-ovf] rev=ml426 stride skipped (stack bounds)\n" );
+        return;
+    }
+    {
+        static uint64_t buf[8192];
+        unsigned long long lo = ((unsigned long long)fault_addr + 0x3fffULL) & ~0x3fffULL;
+        struct { int off, run; uint64_t raw; } slot[16];
+        int want, nq, off, si, ns, best_run, saw_named, pass;
+        if (lo >= sb) return;
+        want = (int)sizeof(buf);
+        if (sb - lo < (unsigned long long)want) want = (int)(sb - lo);
+        want &= ~7;
+        got = 0;
+        kr = mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)lo, (mach_vm_size_t)want,
+                                     (mach_vm_address_t)buf, &got );
+        if ((kr != KERN_SUCCESS || got < 0x4000) && want > 0x4000)
+        {
+            want = 0x4000;
+            got = 0;
+            kr = mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)lo, 0x4000,
+                                         (mach_vm_address_t)buf, &got );
+        }
+        if (kr != KERN_SUCCESS || got < 16)
+        {
+            dprintf( 2, "[stack-ovf] rev=ml426 first page unreadable kr=%d got=%llu lo=0x%llx\n",
+                     (int)kr, (unsigned long long)got, lo );
+            return;
+        }
+        nq = (int)(got / 8);
+        best_run = 0;
+        for (off = 0; off < 0x4d0 && (off / 8) < nq; off += 8)
+        {
+            int qi = off / 8, run = 1, j;
+            uint64_t raw = buf[qi];
+            if (!ios_ovf_ptr( ios_ovf_canon( raw ) )) continue;
+            for (j = qi + (0x4d0 / 8); j < nq; j += (0x4d0 / 8))
+            {
+                if (buf[j] != raw) break;
+                run++;
+            }
+            if (run > best_run) best_run = run;
+        }
+        ns = 0;
+        saw_named = 0;
+        if (best_run >= 4)
+        {
+            for (pass = 0; pass < 2 && ns == 0; pass++)
+            {
+                for (off = 0; off < 0x4d0 && (off / 8) < nq && ns < 16; off += 8)
+                {
+                    int qi = off / 8, run = 1, j, named, dup;
+                    uint64_t raw = buf[qi];
+                    char tmp[96];
+                    if (!ios_ovf_ptr( ios_ovf_canon( raw ) )) continue;
+                    for (j = qi + (0x4d0 / 8); j < nq; j += (0x4d0 / 8))
+                    {
+                        if (buf[j] != raw) break;
+                        run++;
+                    }
+                    if (run != best_run) continue;
+                    named = ios_ovf_fmt_addr( ios_ovf_canon( raw ), tmp, sizeof(tmp) );
+                    if (pass == 0 && !named) continue;
+                    dup = 0;
+                    for (si = 0; si < ns; si++) if (slot[si].raw == raw) dup = 1;
+                    if (dup) continue;
+                    slot[ns].off = off;
+                    slot[ns].run = run;
+                    slot[ns].raw = raw;
+                    ns++;
+                    if (named) saw_named = 1;
+                }
+            }
+        }
+        if (ns > 0)
+        {
+            uint64_t addr = lo + (unsigned long long)slot[0].off;
+            uint64_t count = 0, diff = 0, diff_at = 0;
+            int diff_kind = 0;
+            char vn[96], dn[96];
+            while (count < 20000 && addr + 8 <= sb)
+            {
+                uint64_t word = 0;
+                mach_vm_size_t g2 = 0;
+                kern_return_t kr2 = mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)addr, 8,
+                                                            (mach_vm_address_t)&word, &g2 );
+                if (kr2 != KERN_SUCCESS || g2 != 8)
+                {
+                    diff_kind = -1;
+                    diff_at = addr;
+                    break;
+                }
+                if (word != slot[0].raw)
+                {
+                    diff_kind = 1;
+                    diff = word;
+                    diff_at = addr;
+                    break;
+                }
+                count++;
+                addr += 0x4d0;
+            }
+            ios_ovf_fmt_addr( ios_ovf_canon( slot[0].raw ), vn, sizeof(vn) );
+            if (diff_kind == 1)
+                ios_ovf_fmt_addr( ios_ovf_canon( diff ), dn, sizeof(dn) );
+            else
+                snprintf( dn, sizeof(dn), "%s", diff_kind ? "unreadable" : "none" );
+            dprintf( 2, "[stack-ovf] rev=ml426 stride=0x4d0 off=0x%x run=%llu span=0x%llx value=0x%llx %s diff-at=0x%llx diff=0x%llx %s named=%d slots=%d\n",
+                     slot[0].off, (unsigned long long)count, (unsigned long long)(count * 0x4d0),
+                     (unsigned long long)slot[0].raw, vn,
+                     (unsigned long long)diff_at, (unsigned long long)diff, dn,
+                     saw_named, ns );
+            for (si = 1; si < ns; si++)
+            {
+                ios_ovf_fmt_addr( ios_ovf_canon( slot[si].raw ), vn, sizeof(vn) );
+                dprintf( 2, "[stack-ovf] rev=ml426 stride-also off=0x%x value=0x%llx %s\n",
+                         slot[si].off, (unsigned long long)slot[si].raw, vn );
+            }
+        }
+        else
+        {
+            int hits = 0, qi, limit = nq < (0x900 / 8) ? nq : (0x900 / 8);
+            dprintf( 2, "[stack-ovf] rev=ml426 no 0x4d0 repeat in the first %d bytes (best=%d)\n",
+                     nq * 8, best_run );
+            for (qi = 0; qi < limit && hits < 12; qi++)
+            {
+                uint64_t v = ios_ovf_canon( buf[qi] );
+                char tmp[96];
+                if (!ios_ovf_ptr( v )) continue;
+                ios_ovf_fmt_addr( v, tmp, sizeof(tmp) );
+                dprintf( 2, "[stack-ovf] rev=ml426 ptr +0x%x raw=0x%llx %s\n",
+                         qi * 8, (unsigned long long)buf[qi], tmp );
+                hits++;
+            }
+        }
+    }
+}
+
 static int ios_mach_deliver_guest_exception_inner( thread_t thread, arm_thread_state64_t *state,
                                                    arm_neon_state64_t *neon, int have_neon,
                                                    int exception, uintptr_t fault_addr,
@@ -7695,6 +8010,10 @@ static int ios_mach_deliver_guest_exception_inner( thread_t thread, arm_thread_s
     extern uint64_t ios_jit_reverse_translate( uint64_t addr, uint64_t *module_base );
 
     uint64_t pc = arm_thread_state64_get_pc( *state );
+    /* Snapshot before delivery overwrites PC/SP. LR is not rewritten, but
+     * SP is, and ml427 needs the faulting SP. */
+    uint64_t ovf_sp = arm_thread_state64_get_sp( *state );
+    uint64_t ovf_lr = arm_thread_state64_get_lr( *state );
     uintptr_t rxb = (uintptr_t)ios_jit_rx_base_global;
     TEB *teb = NULL;
     void *dispatcher;
@@ -8411,7 +8730,7 @@ dispatch:
             unsigned long long sl = *(unsigned long long *)(thread_teb + 0x10);
             unsigned long long da = *(unsigned long long *)(thread_teb + 0x1478);
             dprintf( 2, "[stack-ovf] rev=ml424 teb=%p StackBase=0x%llx StackLimit=0x%llx "
-                     "DeallocationStack=0x%llx reserve=0x%llx (floor now 0x800000)\n",
+                     "DeallocationStack=0x%llx reserve=0x%llx (floor now 0x1000000)\n",
                      (void *)thread_teb, sb, sl, da, sb - da );
 
             /* ml424 (#70 round 2): a 4MB stack STILL overflowed and the SEH
@@ -8485,6 +8804,7 @@ dispatch:
                     }
                 }
             }
+            ios_ovf_ml426( pc, ovf_sp, ovf_lr, fault_addr, sb, da );
         }
     }
     return 1;
@@ -10362,19 +10682,19 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
                              * entries (4.6% and 0.3% of the window). Print what
                              * is actually being asked — entries USED — so it
                              * cannot be misread again. */
-                            unsigned long long dflt = cr[1] + 0x400000;
+                            unsigned long long dflt = cr[1] + FEX_CALLRET_DEFAULT_OFFSET;
                             unsigned long long used_b = (dflt > cr[0]) ? dflt - cr[0] : 0;
 
-                            ERR("  [callret] sp=%p base=%p default=%p used=%llu entries (%llu bytes, %llu%% of 4MB)\n",
+                            ERR("  [callret] sp=%p base=%p default=%p used=%llu entries (%llu bytes, default_offset=0x%x)\n",
                                 (void *)cr[0], (void *)cr[1], (void *)(uintptr_t)dflt,
-                                used_b / 16, used_b, (used_b * 100) / 0x400000 );
+                                used_b / 16, used_b, FEX_CALLRET_DEFAULT_OFFSET );
 
                             /* ml213: the cap was 0x100000, but a real run had depth=168218
                              * (1.28MB of stack) and the dump was skipped for no good
                              * reason — only the TOP n*8 bytes are ever read, so the total
                              * size never mattered. Bound it generously, purely as a
                              * sanity check against a garbage sp/base pair. */
-                            if (used_b && cr[0] - cr[1] <= 0x10000000)
+                            if (used_b && cr[0] >= cr[1] && cr[0] - cr[1] < FEX_CALLRET_STACK_SIZE)
                             {
                                 /* ml381: qwords to dump from the top of the
                                  * stack — 2 qwords per 16-byte entry. */

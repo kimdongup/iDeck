@@ -196,3 +196,9 @@ Steam32OfficialClient/
 app/Frameworks/StikJIT.xcframework/ios-arm64/StikJIT.framework/Info.plist
 app/Frameworks/StikJIT.xcframework/ios-arm64/StikJIT.framework/Modules/StikJIT.swiftmodule/*.swiftmodule
 app/Frameworks/StikJIT.xcframework/ios-arm64/StikJIT.framework/Modules/StikJIT.swiftmodule/*.swiftsourceinfo
+
+# Runtime backups and Python caches are local artifacts.
+*.dll.bak*
+*.dll.orig
+__pycache__/
+*.py[cod]

@@ -1,0 +1,48 @@
+{
+  "cef_crashpad_patch_sha256": "e1474ca60831144a5c096e8dcd3f8e0a36307b55ceb1ab63fe45883dcd396d85",
+  "chromium": {
+    "brp_pool_bytes": 1073741824,
+    "cef_crash_patch_sha256": "28c7eb14cb25305c392586888f271edde9ce56406d7282fd0e2ddd0a89d0ffdd",
+    "cef_glue": "complete upstream crashpad_1995.patch plus exact chrome_elf_set target",
+    "cef_revision": "a5d51ba9db7ee74a523dc247bd09ec91ba4d7446",
+    "chromium_revision": "2e81dea53f5ecdc1c057e4c70ecd66151987296a",
+    "focused_buildflag_headers": [
+      "chrome/common/BUILD.gn",
+      "media/BUILD.gn",
+      "ui/base/BUILD.gn",
+      "tools/v8_context_snapshot/BUILD.gn"
+    ],
+    "header_original_sha256": "96faadaf33cafc64caba2d404838e765453dd45f3cc6d8747d7278c6faebdf34",
+    "header_patched_sha256": "968dcf754170b273e5f2c78597394b7f48095ba9d8d4307820758807457e7cee",
+    "regular_pool_bytes": 1073741824,
+    "runtime_validation": false,
+    "scope": "only chrome_elf with upstream CEF crash integration; no libcef or Valve binary changes",
+    "target": "chrome_elf"
+  },
+  "components": {
+    "chrome_elf.dll": {
+      "bytes": 1666560,
+      "sha256": "673584661cd0044b186e40286b3d57a099b45002d3fc50f334ae1d3d14bc7621"
+    },
+    "config_guard.exe": {
+      "bytes": 91136,
+      "sha256": "0d7e0e45215c94da469d1c167aaa3533e2a9c563d4acc5f13b567860011a5640"
+    },
+    "crashpad_handler.exe": {
+      "bytes": 25614848,
+      "sha256": "76303a50b472a8a97c7d336564f00498ab5d34104d1f5c994056125528d8fd11"
+    }
+  },
+  "crashpad_revision": "1174aa4fc3196f478b5b4b77fc970d1cb85cb7cf",
+  "fresh_setup_device_validation": false,
+  "mini_chromium_revision": "a6607b1fd76b740f31c2249fef2c0bec27ffbe52",
+  "rebuild": [
+    "experiments/cef64/README.md",
+    "experiments/cef64/crashpad/README.md",
+    "experiments/cef64/crashpad/config_guard.c"
+  ],
+  "release_source_required": true,
+  "schema": 1,
+  "scope": "Source-built compatibility components only; Valve libcef/helper/client are downloaded separately.",
+  "steam_manifest_version": "1769025840"
+}

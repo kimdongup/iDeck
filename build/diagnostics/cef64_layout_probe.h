@@ -19,12 +19,12 @@ static int ideck_cef64_layout_mode(const char *option, int argc, char **argv)
 
 struct ideck_cef64_slot { uint64_t base, size; const char *name; };
 static const struct ideck_cef64_slot ideck_cef64_slots[] = {
-    {UINT64_C(0x7100000000), UINT64_C(0x40000000), "source-elf-regular-1GiB"},
-    {UINT64_C(0x717fff0000), UINT64_C(0x40010000), "source-elf-BRP-1GiB-plus-guard"},
-    {UINT64_C(0x7200000000), UINT64_C(0x200000000), "full-V8-cage-8GiB"},
-    {UINT64_C(0x7400000000), UINT64_C(0x3c0000000), "FEX-arena-capacity-15GiB"},
-    {UINT64_C(0x77ffff0000), UINT64_C(0x400010000), "CEF-BRP-16GiB-plus-guard"},
-    {UINT64_C(0x7c00000000), UINT64_C(0x400000000), "CEF-regular-16GiB"}
+    {UINT64_C(0x7140000000), UINT64_C(0x10000000), "libcef-regular-256MiB"},
+    {UINT64_C(0x712fff0000), UINT64_C(0x10010000), "libcef-BRP-256MiB-plus-guard"},
+    {UINT64_C(0x7100000000), UINT64_C(0x10000000), "V8-cage-256MiB-aligned-4GiB"},
+    {UINT64_C(0x7000000000), UINT64_C(0x08000000), "Oilpan-cage-128MiB-aligned-4GiB"},
+    {UINT64_C(0x7110000000), UINT64_C(0x08000000), "chrome-elf-regular-128MiB"},
+    {UINT64_C(0x711fff0000), UINT64_C(0x08010000), "chrome-elf-BRP-128MiB-plus-guard"}
 };
 
 /* Explicit alternative, not the default: the observed FEX high-water address
