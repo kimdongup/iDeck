@@ -1113,14 +1113,15 @@ static struct mapping *create_mapping( struct object *root, const struct unicode
     int unix_fd;
     struct stat st;
 
-    /* ml1310 / rev=b212: Steam watchdog restarts webhelper when unresponsive.
+    /* ml1310 / rev=b213: Steam watchdog restarts webhelper when unresponsive.
      * On restart, Steam attempts to recreate SteamChrome_MasterStream_spid*_mem with
-     * CREATE_NEW (fail if exists). If the old mapping object from the previous
+     * CREATE_NEW (attributes lack OBJ_OPENIF). If an old mapping object from the previous
      * webhelper session still exists in the namespace, create_named_object returns
-     * STATUS_OBJECT_NAME_EXISTS, causing Steam to abort with:
+     * STATUS_OBJECT_NAME_COLLISION / STATUS_OBJECT_NAME_EXISTS, causing Steam to abort with:
      * "Created mapping SteamChrome_MasterStream_spid120_mem when set to fail if created".
-     * Unlink any existing mapping with this name so CREATE_NEW succeeds cleanly. */
-    if (is_steamchrome_masterstream( name ))
+     * Only unlink when !(attr & OBJ_OPENIF) so steamwebhelper (which specifies OBJ_OPENIF
+     * to connect to the stream) can join the existing mapping instead of destroying it. */
+    if (is_steamchrome_masterstream( name ) && !(attr & OBJ_OPENIF))
     {
         struct object *old_obj;
         struct unicode_str new_name;
