@@ -2660,6 +2660,17 @@ static unsigned int check_sharing( struct fd *fd, unsigned int access, unsigned 
         existing_access |= fd_ptr->access;
     }
 
+#ifdef WINE_IOS
+    /* Crashpad / Steam crash reporting: minidump (.dmp) files are opened with
+     * conflicting sharing/DELETE access flags by crashpad_handler when finalizing
+     * minidumps. Bypassing DELETE sharing violation on .dmp files prevents crashpad
+     * from crashing or hanging and wedging suspended threads. */
+    if (fd->unix_name && (strstr( fd->unix_name, ".dmp" ) || strstr( fd->unix_name, "/dumps/" )))
+    {
+        existing_sharing |= FILE_SHARE_DELETE;
+    }
+#endif
+
     if (((access & read_access) && !(existing_sharing & FILE_SHARE_READ)) ||
         ((access & write_access) && !(existing_sharing & FILE_SHARE_WRITE)) ||
         ((access & DELETE) && !(existing_sharing & FILE_SHARE_DELETE)))

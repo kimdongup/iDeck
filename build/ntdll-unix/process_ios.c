@@ -1949,7 +1949,8 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
                  * Feature strings verified present in libcef. One variable per
                  * run: --js-flags=--jitless held in reserve if this fails. */
                 static const char brp[] = ",PartitionAllocBackupRefPtr,SegmentationPlatform"
-                                          ",OptimizationTargetPrediction,OptimizationHints";
+                                          ",OptimizationTargetPrediction,OptimizationHints"
+                                          ",StackSamplingProfiler";
                 int sl = (int)strlen( sp );
                 int dfl = sizeof(dfs) - 1, bl = sizeof(brp) - 1;
                 int df_end = -1;
@@ -3594,7 +3595,8 @@ void fill_vm_counters( VM_COUNTERS_EX *pvmi, int unix_pid )
     if(task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &infoCount) == KERN_SUCCESS)
     {
         pvmi->VirtualSize = info.resident_size + info.virtual_size;
-        pvmi->PagefileUsage = info.virtual_size;
+        pvmi->PagefileUsage = info.resident_size;
+        pvmi->PeakPagefileUsage = info.resident_size_max;
         pvmi->WorkingSetSize = info.resident_size;
         pvmi->PeakWorkingSetSize = info.resident_size_max;
     }

@@ -1087,6 +1087,21 @@ static unsigned int get_mapping_flags( obj_handle_t handle, unsigned int flags )
 }
 
 
+static int is_steamchrome_masterstream( const struct unicode_str *name )
+{
+    static const WCHAR target[] = {'S','t','e','a','m','C','h','r','o','m','e','_','M','a','s','t','e','r','S','t','r','e','a','m'};
+    size_t n, i, target_len = sizeof(target) / sizeof(WCHAR);
+    if (!name || !name->len) return 0;
+    n = name->len / sizeof(WCHAR);
+    if (n < target_len) return 0;
+    for (i = 0; i <= n - target_len; i++)
+    {
+        if (!memcmp( &name->str[i], target, sizeof(target) ))
+            return 1;
+    }
+    return 0;
+}
+
 static struct mapping *create_mapping( struct object *root, const struct unicode_str *name,
                                        unsigned int attr, mem_size_t size, unsigned int flags,
                                        obj_handle_t handle, unsigned int file_access,
@@ -1097,6 +1112,28 @@ static struct mapping *create_mapping( struct object *root, const struct unicode
     struct fd *fd;
     int unix_fd;
     struct stat st;
+
+    /* ml1310 / rev=b212: Steam watchdog restarts webhelper when unresponsive.
+     * On restart, Steam attempts to recreate SteamChrome_MasterStream_spid*_mem with
+     * CREATE_NEW (fail if exists). If the old mapping object from the previous
+     * webhelper session still exists in the namespace, create_named_object returns
+     * STATUS_OBJECT_NAME_EXISTS, causing Steam to abort with:
+     * "Created mapping SteamChrome_MasterStream_spid120_mem when set to fail if created".
+     * Unlink any existing mapping with this name so CREATE_NEW succeeds cleanly. */
+    if (is_steamchrome_masterstream( name ))
+    {
+        struct object *old_obj;
+        struct unicode_str new_name;
+        if ((old_obj = lookup_named_object( root, name, attr, &new_name )))
+        {
+            if (!new_name.len)
+            {
+                fprintf( stderr, "[sc-shm] unlinking stale mapping obj=%p for SteamChrome_MasterStream restart rev=b212\n", old_obj );
+                unlink_named_object( old_obj );
+            }
+            release_object( old_obj );
+        }
+    }
 
     if (!(mapping = create_named_object( root, &mapping_ops, name, attr, sd )))
         return NULL;

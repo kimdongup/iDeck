@@ -33,6 +33,7 @@ def chunk(start_marker, end_marker):
     return src[start:src.index(end_marker, start)]
 
 
+chromium = chunk('static int ios_avail_phys_chromium( void )', '\n/***********************************************************************\n *           ios_avail_phys\n')
 spill = chunk('static int ios_stack_spill_enabled(void)', '/***********************************************************************\n *           map_view')
 floor = chunk('#define IOS_SMALL_STACK_FLOOR', '/***********************************************************************\n *           virtual_alloc_thread_stack')
 
@@ -50,7 +51,8 @@ typedef struct { UNICODE_STRING ImagePathName; } RTL_USER_PROCESS_PARAMETERS;
 typedef struct { RTL_USER_PROCESS_PARAMETERS *ProcessParameters; } PEB;
 static PEB *fake_peb;
 static void *ios_jit_current_peb(void) { return fake_peb; }
-''' + spill + floor + r'''
+static int madeira_cfg_get(const char *k, char *v, size_t c) { (void)k; (void)v; (void)c; return 0; }
+''' + chromium + spill + floor + r'''
 static WCHAR wbuf[260];
 int main(int argc, char **argv)
 {
@@ -95,26 +97,26 @@ with tempfile.TemporaryDirectory(prefix='madeira-stack-spill-') as directory:
     print('PASS: the 4 GB-floor spill is on only with MADEIRA_THREAD_STACK_SPILL=1')
 
     cases = (
-        (rdr2, None, 8 * MB),
-        (rdr2, '', 8 * MB),
+        (rdr2, None, 16 * MB),
+        (rdr2, '', 16 * MB),
         (rdr2, 'RDR2.exe', 2 * MB),
         (rdr2, 'rdr2.EXE', 2 * MB),
         (rdr2, 'GTA5.exe, RDR2.exe', 2 * MB),
         (rdr2, ' RDR2.exe ;PlayRDR2.exe', 2 * MB),
-        (rdr2, 'DR2.exe', 8 * MB),
-        (rdr2, 'RDR2.ex', 8 * MB),
-        (rdr2, 'RDR2.exe2', 8 * MB),
-        (helper, 'RDR2.exe', 8 * MB),
+        (rdr2, 'DR2.exe', 16 * MB),
+        (rdr2, 'RDR2.ex', 16 * MB),
+        (rdr2, 'RDR2.exe2', 16 * MB),
+        (helper, 'RDR2.exe', 64 * MB),
         ('RDR2.exe', 'RDR2.exe', 2 * MB),
         ('C:/games/RDR2.exe', 'RDR2.exe', 2 * MB),
-        (rdr2, ',;', 8 * MB),
+        (rdr2, ',;', 16 * MB),
     )
     for path, value, want in cases:
         r = run(path, {} if value is None else {'MADEIRA_SMALL_STACK_EXES': value})
         assert f'floor={want}' in r.stdout, (path, value, r.stdout)
     r = run(rdr2, {'MADEIRA_SMALL_STACK_EXES': 'RDR2.exe'}, no_peb=True)
-    assert f'floor={8 * MB}' in r.stdout, r.stdout
-    print('PASS: only programs named in MADEIRA_SMALL_STACK_EXES get the 2 MB floor; unknown callers keep 8 MB')
+    assert f'floor={16 * MB}' in r.stdout, r.stdout
+    print('PASS: only programs named in MADEIRA_SMALL_STACK_EXES get the 2 MB floor; unknown callers keep 16 MB; Chromium gets 64 MB')
 
 mv = src[src.index('static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,'):]
 mv = mv[:mv.index('\n}\n')]
@@ -130,6 +132,6 @@ print('PASS: map_view treats a 4 GB floor as absent only with the switch and log
 vats = src[src.index('NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack,'):]
 vats = vats[:vats.index('\n}\n')]
 assert 'SIZE_T min_size = ios_thread_stack_floor();' in vats
-assert 'size = max( size, min_size );' in vats and 'size = 8 * 1024 * 1024;' in vats
+assert 'size = min_size;' in vats
 assert vats.index('ios_thread_stack_floor()') < vats.index('map_view(')
-print('PASS: virtual_alloc_thread_stack takes the floor from ios_thread_stack_floor and keeps 8 MB otherwise')
+print('PASS: virtual_alloc_thread_stack takes the floor from ios_thread_stack_floor')

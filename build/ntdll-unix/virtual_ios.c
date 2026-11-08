@@ -25219,14 +25219,23 @@ static int ios_exe_name_in_list( const WCHAR *path, size_t len, const char *list
 static SIZE_T ios_thread_stack_floor(void)
 {
     const char *list = getenv( "MADEIRA_SMALL_STACK_EXES" );
-    PEB *peb;
-    RTL_USER_PROCESS_PARAMETERS *pp;
+    PEB *peb = ios_jit_current_peb();
+    RTL_USER_PROCESS_PARAMETERS *pp = peb ? peb->ProcessParameters : NULL;
 
-    if (!list || !*list) return 16 * 1024 * 1024;
-    peb = ios_jit_current_peb();
-    pp = peb ? peb->ProcessParameters : NULL;
-    if (pp && ios_exe_name_in_list( pp->ImagePathName.Buffer, pp->ImagePathName.Length / sizeof(WCHAR), list ))
+    if (list && *list && pp && ios_exe_name_in_list( pp->ImagePathName.Buffer, pp->ImagePathName.Length / sizeof(WCHAR), list ))
         return IOS_SMALL_STACK_FLOOR;
+
+    if (ios_avail_phys_chromium())
+    {
+        char v[32];
+        const char *c_env = getenv( "MADEIRA_CHROMIUM_STACK_MB" );
+        long mb = 0;
+        if (c_env && *c_env) mb = strtol( c_env, NULL, 0 );
+        else if (madeira_cfg_get( "chromium-stack-mb", v, sizeof v ) && v[0]) mb = strtol( v, NULL, 0 );
+        if (mb >= 16 && mb <= 512) return (SIZE_T)mb * 1024 * 1024;
+        return 128 * 1024 * 1024;
+    }
+
     return 16 * 1024 * 1024;
 }
 
@@ -25265,28 +25274,22 @@ NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR limit_low, UL
      * lazy, so untouched reserve pages never count against the 4096MB jetsam
      * footprint.
      * Build 197: On ARM64EC with 2x frame overhead, CEF's deep initialization
-     * consumes ~8MB without recursion. Lift floor to 16MB (0x1000000). */
-    if (guard_page && size < 16 * 1024 * 1024)
+     * consumes ~8MB without recursion. Lift floor to 16MB (0x1000000).
+     * Build 205: ARM64EC frame amplification during Chromium/CEF deep init
+     * exhausted 16MB (15.968MB consumed, STATUS_STACK_OVERFLOW at ntdll.dll+0xdf208).
+     * Lift floor for Chromium helpers (steamwebhelper.exe) to 128MB (0x8000000). */
+    if (guard_page)
     {
-        /* madeira-bcd: MADEIRA_SMALL_STACK_EXES — see ios_thread_stack_floor */
+        /* madeira-bcd: MADEIRA_SMALL_STACK_EXES / Chromium 64MB floor — see ios_thread_stack_floor */
         SIZE_T min_size = ios_thread_stack_floor();
 
-        if (min_size < 16 * 1024 * 1024)
-        {
-            static int kept;
-            if (kept < 12 && ++kept <= 12)
-                dprintf( 2, "[stack-floor] madeira-bcd #%d thread stack reserve 0x%lx -> 0x%lx "
-                            "(the program is in MADEIRA_SMALL_STACK_EXES)\n",
-                         kept, (unsigned long)size, (unsigned long)max( size, min_size ) );
-            size = max( size, min_size );
-        }
-        else
+        if (size < min_size)
         {
             static int floored;
-            if (floored < 12 && ++floored <= 12)
-                dprintf( 2, "[stack-floor] rev=ml424 #%d thread stack reserve 0x%lx -> 0x1000000\n",
-                         floored, (unsigned long)size );
-            size = 16 * 1024 * 1024;
+            if (floored < 16 && ++floored <= 16)
+                dprintf( 2, "[stack-floor] #%d thread stack reserve 0x%lx -> 0x%lx\n",
+                         floored, (unsigned long)size, (unsigned long)min_size );
+            size = min_size;
         }
     }
 #endif
