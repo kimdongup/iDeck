@@ -1014,8 +1014,6 @@ static void winios_drv_window_pos_changed( HWND hwnd, HWND insert_after, HWND ow
          * Wine has already updated WS_VISIBLE before this callback; include
          * its parent chain so a hidden browser's child Metal layer stays hidden. */
         int visible = is_window_visible( hwnd ) && !IsRectEmpty( v ) && !(swp_flags & SWP_HIDEWINDOW);
-        if (!winios_game_windows() && (v->right - v->left >= 300) && (v->bottom - v->top >= 100) && !(swp_flags & SWP_HIDEWINDOW))
-            visible = 1;
         if (frame_valid)
             winios_window_frame( hwnd, v->left, v->top, v->right - v->left, v->bottom - v->top, visible,
                                  c->left, c->top, c->right - c->left, c->bottom - c->top );

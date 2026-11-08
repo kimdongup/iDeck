@@ -1907,9 +1907,9 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
                  * Interpreted V8 costs 5-20x on all of Steam's UI JavaScript, so
                  * this is the largest single startup lever we have.
                  * MADEIRA_JITLESS=0 turns it off; default stays ON (unchanged). */
-                static const char sp_jitless[] = " --single-process --enable-logging=file --v=1 --log-severity=verbose"
+                static const char sp_jitless[] = " --single-process --disable-stack-profiler --enable-logging=file --v=1 --log-severity=verbose"
                                                  " --no-proxy-server --winhttp-proxy-resolver --js-flags=--jitless";
-                static const char sp_jit[]     = " --single-process --enable-logging=file --v=1 --log-severity=verbose"
+                static const char sp_jit[]     = " --single-process --disable-stack-profiler --enable-logging=file --v=1 --log-severity=verbose"
                                                  " --no-proxy-server --winhttp-proxy-resolver";
                 const char *jl = getenv( "MADEIRA_JITLESS" );
                 int jitless_on = !(jl && jl[0] == '0');
@@ -1921,8 +1921,8 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
                 int steam_ui = ui && !strcmp( ui, "1" );
                 if (steam_ui)
                     sp = jitless_on
-                         ? " --single-process --enable-logging=file --v=0 --log-severity=warning --no-proxy-server --winhttp-proxy-resolver --js-flags=--jitless"
-                         : " --single-process --enable-logging=file --v=0 --log-severity=warning --no-proxy-server --winhttp-proxy-resolver";
+                         ? " --single-process --disable-stack-profiler --enable-logging=file --v=0 --log-severity=warning --no-proxy-server --winhttp-proxy-resolver --js-flags=--jitless"
+                         : " --single-process --disable-stack-profiler --enable-logging=file --v=0 --log-severity=warning --no-proxy-server --winhttp-proxy-resolver";
                 dprintf(2, "[proc-gate] V8 %s (MADEIRA_JITLESS=%s) rev=ml526\n",
                         jitless_on ? "JITLESS (interpreted)" : "JIT ENABLED — #82 retest",
                         jl ? jl : "unset");
