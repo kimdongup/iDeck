@@ -1,5 +1,10 @@
 # iDeck
 
+> **2026-11-09: investigation closed, target not achieved.** The Steam64
+> experiment did not establish validated end-to-end operation. Statements below
+> describe historical product plans and experiments. See the
+> [final wrap-up](STEAM64_FINAL_WRAP_UP_2026-11-09.md) for the final status.
+
 User-directed product integration, 2026-10-23. iDeck runs Valve's genuine Windows
 Steam Big Picture locally through Madeira/Wine/FEX. It does not install Linux
 SteamOS, stream another computer, replace Steam UI, or bypass authentication or

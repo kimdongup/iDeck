@@ -4223,12 +4223,31 @@ DECL_HANDLER(flush)
 DECL_HANDLER(get_file_info)
 {
     struct fd *fd = get_handle_fd_obj( current->process, req->handle, 0 );
+#ifdef WINE_IOS
+    { static int diag=-1; if(diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); diag=(e&&*e&&atoi(e)>=2)?2:(e&&*e&&*e!='0');}
+      if((diag >= 1 && req->info_class == 9/*FileNameInformation*/) || (diag >= 2 && req->handle <= 0x400))
+        fprintf(stderr,"[initdata-inherit][srvfi] get_file_info pid=%04x handle=%04x class=%u fd=%p\n",
+                current->process?current->process->id:0,(unsigned)req->handle,(unsigned)req->info_class,fd); }
+#endif
 
     if (fd)
     {
         fd->fd_ops->get_file_info( fd, req->handle, req->info_class );
+#ifdef WINE_IOS
+        { static int diag=-1; if(diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); diag=(e&&*e&&atoi(e)>=2)?2:(e&&*e&&*e!='0');}
+          if((diag >= 1 && req->info_class == 9) || (diag >= 2 && req->handle <= 0x400))
+            fprintf(stderr,"[initdata-inherit][srvfi] get_file_info result pid=%04x handle=%04x class=%u err=%08x\n",
+                    current->process?current->process->id:0,(unsigned)req->handle,(unsigned)req->info_class,(unsigned)get_error()); }
+#endif
         release_object( fd );
     }
+#ifdef WINE_IOS
+    else
+    { static int diag=-1; if(diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); diag=(e&&*e&&atoi(e)>=2)?2:(e&&*e&&*e!='0');}
+      if(diag >= 1 && req->info_class == 9)
+        fprintf(stderr,"[initdata-inherit][srvfi] get_file_info FAIL pid=%04x handle=%04x class=%u err=%08x\n",
+                current->process?current->process->id:0,(unsigned)req->handle,(unsigned)req->info_class,(unsigned)get_error()); }
+#endif
 }
 
 /* query volume info */
@@ -4291,6 +4310,15 @@ DECL_HANDLER(get_handle_unix_name)
 DECL_HANDLER(get_handle_fd)
 {
     struct fd *fd;
+#ifdef WINE_IOS
+    {
+        static int diag = -1;
+        if (diag < 0) { const char *e = getenv("MADEIRA_DIAG_INITDATA"); diag = (e && *e && atoi(e) >= 2) ? 2 : (e && *e && *e != '0'); }
+        if (diag >= 2 && req->handle <= 0x400)
+            fprintf(stderr, "[initdata-inherit][srvfd] get_handle_fd pid=%04x handle=%04x\n",
+                    current->process ? current->process->id : 0, (unsigned)req->handle);
+    }
+#endif
 
     if ((fd = get_handle_fd_obj( current->process, req->handle, 0 )))
     {
@@ -4317,8 +4345,31 @@ DECL_HANDLER(get_handle_fd)
 #endif
             send_client_fd( current->process, unix_fd, req->handle );
         }
+        else
+        {
+#ifdef WINE_IOS
+            /* U15b: verbose nofd log only at DIAG>=2; level 1 keeps srvfi/pipefi focused. */
+            static int diag = -1;
+            if (diag < 0) { const char *e = getenv("MADEIRA_DIAG_INITDATA"); diag = (e && *e && atoi(e) >= 2) ? 2 : (e && *e && *e != '0'); }
+            if (diag >= 2 && req->handle <= 0x400)
+                fprintf(stderr, "[initdata-inherit][srvfd] get_handle_fd nofd pid=%04x handle=%04x cacheable=%d fd_type=%d opts=%08x no_fd_status=%08x err=%08x\n",
+                        current->process ? current->process->id : 0, (unsigned)req->handle,
+                        reply->cacheable, fd->fd_ops ? (int)fd->fd_ops->get_fd_type(fd) : -1,
+                        (unsigned)fd->options, (unsigned)fd->no_fd_status, (unsigned)get_error());
+#endif
+        }
         release_object( fd );
     }
+#ifdef WINE_IOS
+    else
+    {
+        static int diag = -1;
+        if (diag < 0) { const char *e = getenv("MADEIRA_DIAG_INITDATA"); diag = (e && *e && atoi(e) >= 2) ? 2 : (e && *e && *e != '0'); }
+        if (diag >= 2 && req->handle <= 0x400)
+            fprintf(stderr, "[initdata-inherit][srvfd] get_handle_fd FAIL pid=%04x handle=%04x err=%08x\n",
+                    current->process ? current->process->id : 0, (unsigned)req->handle, get_error());
+    }
+#endif
 }
 
 /* perform a read on a file object */

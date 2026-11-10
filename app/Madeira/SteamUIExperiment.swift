@@ -156,17 +156,30 @@ enum SteamUIExperiment {
         var restoreCrashpadConfig = false
         var gpuAccelerated = false
         var batch: String {
-            var lines = ["@echo off", "start \"\" \"C:\\windows\\system32\\services.exe\"",
-             "if exist C:\\ideck-control.exe start \"\" C:\\ideck-control.exe",
+            let steamLine = "\"\(windowsDirectory)\\steam.exe\" -no-cef-sandbox\(gpuAccelerated ? "" : " -cef-disable-gpu") -nocrashmonitor -nobootstrapperupdate -skipinitialbootstrap -noverifyfiles -norepairfiles -inhibitbootstrap\(bigPicture ? " -bigpicture" : "")\(accountChooser ? " steam://changeuser" : "")\(ratatanThreadTest ? " -applaunch 2949320 -job-worker-count 2 -background-job-worker-count 2" : "")"
+            if ProcessInfo.processInfo.environment["MADEIRA_STEAM_UI_MINIMAL_BATCH"] == "1" {
+                return (["@echo off", "cd /d \"\(windowsDirectory)\"", steamLine] as [String]).joined(separator: "\r\n") + "\r\n"
+            }
+            // Never use Wine `start`/`start.exe` from this batch on iOS: it can
+            // stall and prevent steam.exe from launching (observed in device
+            // captures). Run config_guard synchronously (best-effort) and then
+            // launch steam.exe directly so the main path always proceeds. Aux
+            // processes (services.exe/ideck-control.exe) are intentionally not
+            // spawned via `start` here; if required they must be launched by the
+            // host/app through a non-blocking mechanism.
+            var lines = ["@echo off",
              "cd /d \"\(windowsDirectory)\""]
-            if restoreCrashpadConfig {
+            // config_guard is opt-in: it can hang on iOS/FEX and block steam.exe
+            // (observed capture-170924). Enable only with explicit MADEIRA_CONFIG_GUARD=1.
+            let configGuard = ProcessInfo.processInfo.environment["MADEIRA_CONFIG_GUARD"] == "1"
+            if configGuard && restoreCrashpadConfig {
                 lines += ["C:\\iDeckCEF64Crashpad\\config_guard.exe --restore > C:\\madeira-cef64-config-guard-results.txt 2>&1 || rem"]
             }
-            if externalCrashpad {
+            if configGuard && externalCrashpad {
                 lines += ["C:\\iDeckCEF64Crashpad\\config_guard.exe --protect >> C:\\madeira-cef64-config-guard-results.txt 2>&1 || rem"]
             }
-            lines += ["\"\(windowsDirectory)\\steam.exe\" -no-cef-sandbox\(gpuAccelerated ? "" : " -cef-disable-gpu") -nocrashmonitor -nobootstrapperupdate -skipinitialbootstrap -noverifyfiles -norepairfiles -inhibitbootstrap\(bigPicture ? " -bigpicture" : "")\(accountChooser ? " steam://changeuser" : "")\(ratatanThreadTest ? " -applaunch 2949320 -job-worker-count 2 -background-job-worker-count 2" : "")"]
-            if externalCrashpad { lines += ["C:\\iDeckCEF64Crashpad\\config_guard.exe --restore >> C:\\madeira-cef64-config-guard-results.txt 2>&1"] }
+            lines += [steamLine]
+            if configGuard && externalCrashpad { lines += ["C:\\iDeckCEF64Crashpad\\config_guard.exe --restore >> C:\\madeira-cef64-config-guard-results.txt 2>&1"] }
             return lines.joined(separator: "\r\n") + "\r\n"
         }
         var arguments: String { "/desktop=steamui,\(width)x\(height) cmd /c C:\\madeira-steam-ui.cmd" }

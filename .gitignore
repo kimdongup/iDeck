@@ -202,3 +202,4 @@ app/Frameworks/StikJIT.xcframework/ios-arm64/StikJIT.framework/Modules/StikJIT.s
 *.dll.orig
 __pycache__/
 *.py[cod]
+*.a.before-*

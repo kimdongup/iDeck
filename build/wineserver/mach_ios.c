@@ -1117,6 +1117,11 @@ int read_process_memory( struct process *process, client_ptr_t ptr, data_size_t 
 
     if (!process_port)
     {
+#ifdef WINE_IOS
+        { static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+          if(_diag) fprintf(stderr,"[initdata-inherit][rpm-mach] NO_PORT target=%04x unix_pid=%d self=%d ptr=%llx size=%u\n",
+                            process?process->id:0,process?process->unix_pid:0,(int)getpid(),(unsigned long long)ptr,(unsigned)size); }
+#endif
         set_error( STATUS_ACCESS_DENIED );
         return 0;
     }
@@ -1127,6 +1132,11 @@ int read_process_memory( struct process *process, client_ptr_t ptr, data_size_t 
     }
 
     ret = mach_vm_read_overwrite( process_port, (mach_vm_address_t)ptr, (mach_vm_size_t)size, (mach_vm_address_t)dest, &bytes_read );
+#ifdef WINE_IOS
+    { static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+      if(_diag && ret != KERN_SUCCESS) fprintf(stderr,"[initdata-inherit][rpm-mach] FAIL target=%04x ptr=%llx size=%u ret=%x\n",
+                            process?process->id:0,(unsigned long long)ptr,(unsigned)size,(unsigned)ret); }
+#endif
     mach_set_error( ret );
     return (ret == KERN_SUCCESS);
 }

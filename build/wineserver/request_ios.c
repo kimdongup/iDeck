@@ -235,35 +235,56 @@ void write_reply( struct thread *thread )
 {
     int ret;
 
-    if ((ret = write( get_unix_fd( thread->reply_fd ),
-                      (char *)thread->reply_data + thread->reply_size - thread->reply_towrite,
-                      thread->reply_towrite )) >= 0)
+    for (;;)
     {
-        if (!(thread->reply_towrite -= ret))
+        if ((ret = write( get_unix_fd( thread->reply_fd ),
+                          (char *)thread->reply_data + thread->reply_size - thread->reply_towrite,
+                          thread->reply_towrite )) >= 0)
         {
-            free( thread->reply_data );
-            thread->reply_data = NULL;
-            /* sent everything, can go back to waiting for requests */
-            set_fd_events( thread->request_fd, POLLIN );
-            set_fd_events( thread->reply_fd, 0 );
+            if (!(thread->reply_towrite -= ret))
+            {
+#ifdef WINE_IOS
+                { static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+                  if(_diag) fprintf(stderr,"[initdata-inherit][wreply-done] pid=%04x tid=%04x size=%u srv_replyfd=%d srv_reqfd=%d\n",
+                    thread&&thread->process?thread->process->id:0, thread?thread->id:0, (unsigned)thread->reply_size,
+                    thread&&thread->reply_fd?get_unix_fd(thread->reply_fd):-1, thread&&thread->request_fd?get_unix_fd(thread->request_fd):-1); }
+#endif
+                free( thread->reply_data );
+                thread->reply_data = NULL;
+                /* sent everything, can go back to waiting for requests */
+                set_fd_events( thread->request_fd, POLLIN );
+                set_fd_events( thread->reply_fd, 0 );
+                return;
+            }
+            continue; /* wrote progress, try to drain while writable */
         }
-        return;
+        if (errno == EPIPE)
+            kill_thread( thread, 0 );  /* normal death */
+        else if (errno != EWOULDBLOCK && (EWOULDBLOCK == EAGAIN || errno != EAGAIN))
+            fatal_protocol_error( thread, "reply write: %s\n", strerror( errno ));
+        return; /* EAGAIN/EWOULDBLOCK: wait for next POLLOUT */
     }
-    if (errno == EPIPE)
-        kill_thread( thread, 0 );  /* normal death */
-    else if (errno != EWOULDBLOCK && (EWOULDBLOCK == EAGAIN || errno != EAGAIN))
-        fatal_protocol_error( thread, "reply write: %s\n", strerror( errno ));
 }
 
 /* send a reply to the current thread */
 static void send_reply( union generic_reply *reply )
 {
     int ret;
+#ifdef WINE_IOS
+    int _trace=0, _err=0, _retv=0, _sz=(int)sizeof(*reply)+(int)current->reply_size;
+    if (current && current->req.request_header.req == 84 /* REQ_read_process_memory */) {
+        static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+        _trace=_diag;
+    }
+#endif
 
     if (!current->reply_size)
     {
         if ((ret = write( get_unix_fd( current->reply_fd ),
                           reply, sizeof(*reply) )) != sizeof(*reply)) goto error;
+#ifdef WINE_IOS
+        _retv=ret;
+#endif
     }
     else
     {
@@ -275,20 +296,38 @@ static void send_reply( union generic_reply *reply )
         vec[1].iov_len  = current->reply_size;
 
         if ((ret = writev( get_unix_fd( current->reply_fd ), vec, 2 )) < sizeof(*reply)) goto error;
+#ifdef WINE_IOS
+        _retv=ret;
+#endif
 
         if ((current->reply_towrite = current->reply_size - (ret - sizeof(*reply))))
         {
             /* couldn't write it all, wait for POLLOUT */
+#ifdef WINE_IOS
+            if (_trace || current->req.request_header.req==84) fprintf(stderr,"[initdata-inherit][sndreply] pid=%04x tid=%04x req=84 partial ret=%d sz=%d remain=%u srv_replyfd=%d srv_reqfd=%d\n",
+                current->process?current->process->id:0,current->id,_retv,_sz,(unsigned)current->reply_towrite,current->reply_fd?get_unix_fd(current->reply_fd):-1,current->request_fd?get_unix_fd(current->request_fd):-1);
+#endif
             set_fd_events( current->reply_fd, POLLOUT );
             set_fd_events( current->request_fd, 0 );
             return;
         }
     }
+#ifdef WINE_IOS
+    /* ok replies are frequent (rpm req84); log only at DIAG>=2. partial/ERR always logged for req84 above. */
+    { static int _diag2=-1; if(_diag2<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag2=(e&&atoi(e)>=2);}
+      if (_diag2 || (_trace && current->req.request_header.req!=84)) fprintf(stderr,"[initdata-inherit][sndreply] pid=%04x tid=%04x req=%u ok ret=%d sz=%d srv_replyfd=%d srv_reqfd=%d\n",
+        current->process?current->process->id:0,current->id,current?current->req.request_header.req:0,_retv,_sz,current->reply_fd?get_unix_fd(current->reply_fd):-1,current->request_fd?get_unix_fd(current->request_fd):-1); }
+#endif
     free( current->reply_data );
     current->reply_data = NULL;
     return;
 
  error:
+#ifdef WINE_IOS
+    _err=errno; _retv=ret;
+    if (_trace || (current && current->req.request_header.req==84)) fprintf(stderr,"[initdata-inherit][sndreply] pid=%04x tid=%04x req=%u ERR ret=%d errno=%d sz=%d srv_replyfd=%d srv_reqfd=%d\n",
+        current? (current->process?current->process->id:0):0, current?current->id:0, current?current->req.request_header.req:0, _retv,_err,_sz,current&&current->reply_fd?get_unix_fd(current->reply_fd):-1,current&&current->request_fd?get_unix_fd(current->request_fd):-1);
+#endif
     if (ret >= 0)
         fatal_protocol_error( current, "partial write %d\n", ret );
     else if (errno == EPIPE)
@@ -443,10 +482,19 @@ static void call_req_handler( struct thread *thread )
     if (debug_level) trace_request();
 
     ios_req_census( thread, req );
-    if (req < REQ_NB_REQUESTS)
-        req_handlers[req]( &current->req, &reply );
-    else
-        set_error( STATUS_NOT_IMPLEMENTED );
+    {
+        int _trace = 0;
+        static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e&&*e!='0');}
+        if (_diag && req == 84 /* REQ_set_debug_obj_info */) _trace = 1;
+        if (_trace) fprintf(stderr,"[initdata-inherit][srvdisp] pid=%04x tid=%04x req=%u enter\n",
+                            thread&&thread->process?thread->process->id:0, thread?thread->id:0, (unsigned)req);
+        if (req < REQ_NB_REQUESTS)
+            req_handlers[req]( &current->req, &reply );
+        else
+            set_error( STATUS_NOT_IMPLEMENTED );
+        if (_trace) fprintf(stderr,"[initdata-inherit][srvdisp] pid=%04x tid=%04x req=%u exit err=%08x\n",
+                            thread&&thread->process?thread->process->id:0, thread?thread->id:0, (unsigned)req, (unsigned)current->error);
+    }
 
     if (current)
     {

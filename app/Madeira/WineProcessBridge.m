@@ -938,8 +938,17 @@ static void *wine_process_thread(void *arg) {
                     setenv("WINEDEBUG", "-all,err+module", 1);
                     LOG("[steam-ui] module-load errors enabled; all trace channels disabled");
                 } else {
-                    setenv("WINEDEBUG", "-all", 1); // no raw CEF command lines/credential-bearing payloads
-                    LOG("[steam-ui] Wine payload-wide debug channels disabled; categorical evidence only");
+                    /* Keep payload traces off (process args/file/relay/auth/URL),
+                     * but enable ntdll errors so NtCreateUserProcess/spawn_process/
+                     * proc-gate/steam-ui-process exe-level evidence is capturable. */
+                    const char *tpdbg = getenv("MADEIRA_DEBUG_THREADPOOL");
+                    if (tpdbg && *tpdbg && *tpdbg != '0') {
+                        setenv("WINEDEBUG", "-all,err+ntdll,err+process,warn+threadpool,err+threadpool", 1);
+                        LOG("[steam-ui] Wine debug: ...+threadpool (U16 crashpad wait diag; warn/err only)");
+                    } else {
+                        setenv("WINEDEBUG", "-all,err+ntdll,err+process", 1);
+                        LOG("[steam-ui] Wine debug: -all,err+ntdll,err+process (exe-level process/NtCreateUserProcess evidence; payload traces off)");
+                    }
                 }
             } else if (verbose && *verbose && *verbose != '0') {
                 setenv("WINEDEBUG", "err+all,fixme+all,warn+module,warn+file,trace+process,trace+module,trace+loaddll,trace+loadorder,trace+win,trace+user32,trace+syscall,trace+file", 1);

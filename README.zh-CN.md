@@ -1,5 +1,9 @@
 [English](README.md) · [简体中文](README.zh-CN.md)
 
+> **调查已结束 — 2026-11-09：** 本次 Steam64 调查未能验证完整流程正常运行。
+> 源码和实验记录仅供研究参考，不是可用的 Steam64 发行版。下方演示属于历史实验。
+> 请参阅[最终总结](docs/STEAM64_FINAL_WRAP_UP_2026-11-09.md)。
+
 <p align="center">
   <img src="docs/assets/ideck/icon.png" width="156" alt="iDeck">
 </p>

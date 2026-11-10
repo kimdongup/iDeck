@@ -2645,6 +2645,178 @@ void ios_jumbo_holdback_init( void )
     }
 }
 
+/* iOS-Madeira ml462c (#77): near-libcef CodeRange hole.
+ *
+ * extended_va=false leaves no contiguous 512MB V8 CodeRange window within
+ * reach of libcef's embedded builtins (nocopy ~0x71e0e90000). Other 512MB
+ * reserve-only (bigres/cage-probe) allocations consume the 0x7150-0x71e0 area
+ * before V8 asks for CodeRange (0x20030000, PAGE_NOACCESS, MEM_RESERVE,
+ * unhinted). Reserve a fixed hole early, keep normal reserve placement out of
+ * it, and let the ml462b coderange handler claim it.
+ *
+ * Safety: host MAP_FIXED placeholder only at init (range was free per va-gaps).
+ * Normal allocators must not MAP_FIXED over it; the guard is narrow (reserve-
+ * only placements overlapping the hole, non-coderange-claim). Fixed addresses
+ * explicitly required by Wine image/fixed-map paths are unaffected because this
+ * is consulted only from the competing bigres/reserve steering/placement paths
+ * we touch, and the coderange handler claims explicitly. */
+#define IOS_CODERANGE_HOLE_SIZE 0x20100000ULL  /* 513MB, covers 0x20030000+slop */
+static uintptr_t ios_coderange_hole_base;
+static int       ios_coderange_hole_live;
+static __thread int ios_coderange_hole_claiming;
+
+static int ios_coderange_hole_overlaps( uint64_t base, uint64_t size )
+{
+    uint64_t end, hend;
+    if (!ios_coderange_hole_live || !ios_coderange_hole_base) return 0;
+    end = base + size;
+    hend = (uint64_t)ios_coderange_hole_base + IOS_CODERANGE_HOLE_SIZE;
+    return base < hend && end > (uint64_t)ios_coderange_hole_base;
+}
+
+static void ios_coderange_hole_init( void )
+{
+    /* Prefer a contiguous hole below nocopy libcef (observed ~0x71e0e90000)
+     * but within ~2GB for V8 CodeRange reach. Adaptive: scan free gaps in
+     * [0x7100000000, 0x71e0000000), pick gap ending closest to libcef ceiling
+     * (0x71e0000000) that fits; fall back to fixed candidates. Override with
+     * MADEIRA_CODERANGE_HOLE_ADDR=0x... or disable with MADEIRA_CODERANGE_HOLE=0. */
+    static const uint64_t fixed_candidates[] = {
+        0x71bff00000ULL, 0x71b0000000ULL, 0x71a0000000ULL, 0x7190000000ULL, 0x7180000000ULL, 0
+    };
+    const uint64_t scan_lo = 0x7100000000ULL, scan_hi = 0x71e0000000ULL;
+    const char *env;
+    unsigned i;
+    uint64_t best_base = 0;
+    unsigned long long best_end = 0;
+
+    if (ios_coderange_hole_live) return;
+    env = getenv( "MADEIRA_CODERANGE_HOLE" );
+    if (env && !strcmp( env, "0" ))
+    {
+        dprintf(2, "[coderange-hole] disabled by MADEIRA_CODERANGE_HOLE=0\n");
+        return;
+    }
+    env = getenv( "MADEIRA_CODERANGE_HOLE_ADDR" );
+    if (env && env[0])
+    {
+        uint64_t b = strtoull( env, NULL, 0 );
+        if (b && b >= scan_lo && b + IOS_CODERANGE_HOLE_SIZE <= scan_hi)
+            best_base = b;
+        else
+            dprintf(2, "[coderange-hole] ignoring MADEIRA_CODERANGE_HOLE_ADDR=%s (must fit 0x%llx..0x%llx)\n",
+                    env, (unsigned long long)scan_lo, (unsigned long long)scan_hi);
+    }
+
+    if (!best_base)
+    {
+        mach_vm_address_t addr = (mach_vm_address_t)scan_lo, prev = (mach_vm_address_t)scan_lo;
+        while (addr < scan_hi)
+        {
+            mach_vm_size_t rsz = 0;
+            natural_t depth = 0;
+            vm_region_submap_info_data_64_t info;
+            mach_msg_type_number_t cnt = VM_REGION_SUBMAP_INFO_COUNT_64;
+            mach_vm_address_t gap_start, gap_end;
+            uint64_t gb;
+            if (mach_vm_region_recurse( mach_task_self(), &addr, &rsz, &depth,
+                                        (vm_region_recurse_info_t)&info, &cnt ) != KERN_SUCCESS)
+                break;
+            if (addr > scan_hi) addr = (mach_vm_address_t)scan_hi;
+            gap_start = prev < scan_lo ? (mach_vm_address_t)scan_lo : prev;
+            gap_end = addr < scan_hi ? addr : (mach_vm_address_t)scan_hi;
+            if (gap_end > gap_start && (uint64_t)(gap_end - gap_start) >= IOS_CODERANGE_HOLE_SIZE)
+            {
+                /* place hole at top of gap (closest to libcef) */
+                gb = ((uint64_t)gap_end - IOS_CODERANGE_HOLE_SIZE) & ~(uint64_t)0xffff;
+                if (gb >= (uint64_t)gap_start && gb + IOS_CODERANGE_HOLE_SIZE <= (uint64_t)gap_end
+                    && gb + IOS_CODERANGE_HOLE_SIZE > best_end)
+                {
+                    best_base = gb;
+                    best_end = gb + IOS_CODERANGE_HOLE_SIZE;
+                }
+            }
+            if (!rsz) break;
+            prev = addr + rsz;
+            addr = prev;
+        }
+        if (best_base)
+            dprintf(2, "[coderange-hole] adaptive candidate 0x%llx+0x%llx (gap scan near libcef ceiling) rev=ml462d\n",
+                    (unsigned long long)best_base, (unsigned long long)IOS_CODERANGE_HOLE_SIZE);
+    }
+
+    {
+        uint64_t try_bases[8];
+        unsigned n = 0, t;
+        if (best_base) try_bases[n++] = best_base;
+        for (i = 0; fixed_candidates[i] && n < 8; i++)
+        {
+            for (t = 0; t < n; t++) if (try_bases[t] == fixed_candidates[i]) break;
+            if (t == n) try_bases[n++] = fixed_candidates[i];
+        }
+        for (t = 0; t < n; t++)
+        {
+            uint64_t b = try_bases[t];
+            void *got;
+            if (b < scan_lo || b + IOS_CODERANGE_HOLE_SIZE > scan_hi) continue;
+            got = anon_mmap_tryfixed( (void *)(uintptr_t)b, (size_t)IOS_CODERANGE_HOLE_SIZE, PROT_NONE, MAP_NORESERVE );
+            if (got != MAP_FAILED && (uintptr_t)got == (uintptr_t)b)
+            {
+                ios_coderange_hole_base = (uintptr_t)got;
+                ios_coderange_hole_live = 1;
+                dprintf(2, "[coderange-hole] HELD 0x%llx+0x%llx (%lluMB) PROT_NONE for V8 CodeRange (near libcef) rev=ml462d%s\n",
+                        (unsigned long long)ios_coderange_hole_base,
+                        (unsigned long long)IOS_CODERANGE_HOLE_SIZE,
+                        (unsigned long long)(IOS_CODERANGE_HOLE_SIZE >> 20),
+                        (t == 0 && best_base == b) ? " adaptive" : " fixed-fallback");
+                return;
+            }
+            if (got != MAP_FAILED) munmap( got, (size_t)IOS_CODERANGE_HOLE_SIZE );
+        }
+    }
+    dprintf(2, "[coderange-hole] no candidate hole available (will rely on zone scan/census) rev=ml462d\n");
+}
+
+static uintptr_t ios_coderange_hole_take( size_t size )
+{
+    uintptr_t base = ios_coderange_hole_base;
+    if (!ios_coderange_hole_live || !base || size > IOS_CODERANGE_HOLE_SIZE) return 0;
+    munmap( (void *)base, (size_t)IOS_CODERANGE_HOLE_SIZE );
+    ios_coderange_hole_live = 0;
+    ios_va_release_note();
+    dprintf(2, "[coderange-hole] released 0x%llx+0x%llx for V8 CodeRange size=0x%lx rev=ml462c\n",
+            (unsigned long long)base, (unsigned long long)IOS_CODERANGE_HOLE_SIZE, (unsigned long)size);
+    return base;
+}
+
+static void ios_coderange_census_near_libcef( void )
+{
+    mach_vm_address_t addr = 0x70c0000000ULL;
+    const mach_vm_address_t end = 0x7240000000ULL;
+    int n = 0;
+    dprintf(2, "[coderange-census] host regions 0x70c0-0x7240 (near libcef/CodeRange)\n");
+    while (addr < end && n < 96)
+    {
+        mach_vm_size_t size = 0;
+        natural_t depth = 0;
+        vm_region_submap_info_data_64_t info;
+        mach_msg_type_number_t cnt = VM_REGION_SUBMAP_INFO_COUNT_64;
+        if (mach_vm_region_recurse( mach_task_self(), &addr, &size, &depth,
+                                    (vm_region_recurse_info_t)&info, &cnt ) != KERN_SUCCESS) break;
+        if (addr >= end) break;
+        dprintf(2, "[coderange-census] 0x%011llx +%7lluMB prot=%x/%x tag=%u share=%u res=%uMB%s\n",
+                (unsigned long long)addr, (unsigned long long)(size >> 20),
+                info.protection, info.max_protection, info.user_tag, info.share_mode,
+                (unsigned)(((unsigned long long)info.pages_resident * 4096) >> 20),
+                depth ? " submap" : "");
+        n++;
+        if (!size) break;
+        addr += size;
+    }
+    dprintf(2, "[coderange-census] end regions=%d hole_live=%d hole=0x%llx\n",
+            n, ios_coderange_hole_live, (unsigned long long)ios_coderange_hole_base);
+}
+
 /* Returns the held base if this request can be served from it, else 0. The
  * caller maps at that address; the hold is released first and consumed once. */
 static uintptr_t ios_jumbo_holdback_take( size_t size )
@@ -8392,6 +8564,19 @@ void *anon_mmap_fixed( void *start, size_t size, int prot, int flags )
     assert( !(size & host_page_mask) );
 
     ios_jit_range_tripwire( "anon_mmap_fixed", start, size, prot, __builtin_return_address(0) );
+    /* Narrow guard: competing consumers are reserve-only PROT_NONE mappings
+     * (bigres/cage probes). Do not block executable/committed fixed mappings. */
+    if (ios_coderange_hole_live && !ios_coderange_hole_claiming
+        && prot == PROT_NONE
+        && ios_coderange_hole_overlaps( (uint64_t)(uintptr_t)start, size ))
+    {
+        static unsigned n;
+        if (n++ < 16)
+            dprintf(2, "[coderange-hole] PROTECT blocking anon_mmap_fixed(PROT_NONE) %p+0x%lx over hole 0x%llx rev=ml462d\n",
+                    start, (unsigned long)size, (unsigned long long)ios_coderange_hole_base);
+        errno = EEXIST;
+        return MAP_FAILED;
+    }
     return mmap( start, size, prot, MAP_PRIVATE | MAP_ANON | MAP_FIXED | flags, -1, 0 );
 }
 
@@ -12634,6 +12819,7 @@ static void clear_arm64ec_range( const void *addr, size_t size );
  * aliases (FEX CodeBuffers) in freed ranges are cleared; EC bitmap bits
  * are cleared so a reused range starts with a clean call-routing slate. */
 static void ios_sc_grants_owner_died( void *peb );
+static void ios_dead_process_reclaim_views( void *dead_peb, int fex_only );
 static void ios_fex_reclaim_process( void *dead_peb );
 
 void ios_jit_reclaim_process( void *peb )
@@ -12819,6 +13005,12 @@ void ios_jit_reclaim_process( void *peb )
     /* madeira-bcd: and its FEX code buffers (after the pool lock: the carve
      * lock is never taken under it) */
     ios_tail_carves_owner_died( peb );
+
+    /* Build217: reclaim the dead helper's guest views before its FEX arena.
+     * The libcef image below ios_fex_arena must not keep occupying the
+     * loader's placement window for the next helper generation. The FEX
+     * arena continues to be reclaimed separately, below. */
+    ios_dead_process_reclaim_views( peb, 0 );
 
     /* Build163: Reclaim dead pseudo-process FEX arena views */
     ios_fex_reclaim_process( peb );
@@ -14138,11 +14330,14 @@ static void delete_view( struct file_view *view ) /* [in] View */
     if (ios_retire_trace_armed) ios_retire_mark( "D5<\n" );   /* delete_view complete */
 }
 
-/* Build163: Reclaim all views inside the FEX_ONLY arena allocated by an exited pseudo-process.
- * In a unified Mach task, pseudo-processes share the address space. When a child (e.g. steamwebhelper)
- * exits, its FEX emulator instances and 16MiB rpmalloc spans are dead, but Wine's reserved_areas
- * and views_tree still held them, preventing subsequent processes from obtaining contiguous spans. */
-static void ios_fex_reclaim_process( void *dead_peb )
+/* Build217: Reclaim dead pseudo-process views outside the FEX arena (guest
+ * images and anonymous allocations) before the JIT/FEX lanes finish.
+ * The earlier routine reclaimed FEX arenas only. On the Steam64 CEF path,
+ * the initial libcef image stays mapped after steamwebhelper exits; on the
+ * next helper startup, its image allocation fails at c0000017 and Wine maps
+ * that loader failure back to c0000135. Keep the scans batched so walking
+ * views_tree never invalidates the objects being deleted. */
+static void ios_dead_process_reclaim_views( void *dead_peb, int fex_only )
 {
     sigset_t sigset;
     struct file_view *batch[64];
@@ -14162,13 +14357,17 @@ static void ios_fex_reclaim_process( void *dead_peb )
         WINE_RB_FOR_EACH_ENTRY( view, &views_tree, struct file_view, entry )
         {
             ULONG_PTR vb = (ULONG_PTR)view->base;
-            if (vb >= hi) break;
-            if (vb + view->size <= lo) continue;
-            if (view->owner_peb == dead_peb)
-            {
-                batch[n++] = view;
-                if (n == ARRAY_SIZE(batch)) break;
-            }
+            int in_fex_arena;
+
+            if (view->owner_peb != dead_peb) continue;
+            /* Straddlers are not partially reclaimed. Only page-aligned,
+             * fully contained views are deleted here. */
+            if (vb < lo && vb + view->size > lo) continue;
+            if (vb < hi && vb + view->size > hi) continue;
+            in_fex_arena = vb >= lo && vb + view->size <= hi;
+            if (in_fex_arena != fex_only) continue;
+            batch[n++] = view;
+            if (n == ARRAY_SIZE(batch)) break;
         }
         for (unsigned int i = 0; i < n; i++)
         {
@@ -14182,10 +14381,21 @@ static void ios_fex_reclaim_process( void *dead_peb )
 
     if (deleted)
     {
-        dprintf( 2, "[fex-reclaim] RECLAIM peb=%p: freed %u FEX arena views (0x%lx bytes / %lu MiB)\n",
-                 dead_peb, deleted, (unsigned long)bytes_freed,
+        dprintf( 2, "[%s-reclaim] RECLAIM peb=%p: freed %u %s views (0x%lx bytes / %lu MiB)\n",
+                 fex_only ? "fex" : "dead-process",
+                 dead_peb, deleted, fex_only ? "FEX arena" : "non-FEX",
+                 (unsigned long)bytes_freed,
                  (unsigned long)(bytes_freed >> 20) );
     }
+}
+
+/* Build163: Reclaim all views inside the FEX_ONLY arena allocated by an exited pseudo-process.
+ * In a unified Mach task, pseudo-processes share the address space. When a child (e.g. steamwebhelper)
+ * exits, its FEX emulator instances and 16MiB rpmalloc spans are dead, but Wine's reserved_areas
+ * and views_tree still held them, preventing subsequent processes from obtaining contiguous spans. */
+static void ios_fex_reclaim_process( void *dead_peb )
+{
+    ios_dead_process_reclaim_views( dead_peb, 1 );
 }
 
 
@@ -19609,22 +19819,73 @@ static void *map_reserved_area( void *limit_low, void *limit_high, size_t size, 
     static unsigned long slow_n;
 
     clock_gettime( CLOCK_MONOTONIC, &t0 );
-    /* Build162: Segregate requests <= 9MiB from the high end of the published
-     * arena, specifically covering FEXMem_CallRetStacks (0x802000 = 8.008MiB),
-     * FEXMem_Frontend (8MiB) and FEXMem_Lookup_L1 (2MiB). This leaves lower
-     * runs contiguous and 16MiB-aligned for FEXMem_OpDispatcher and JIT.
-     * In addition, round 0x802000 requests up to 64KiB (0x810000) inside the
-     * arena so that the unaligned 8KiB tail does not fragment the arena or
-     * leave residual dead gaps. */
+    /* Build162/161: FEX arena fragmentation mitigation (opt-in where noted).
+     * - Round 0x802000 (CallRetStacks raw) to 0x810000 to avoid 7.99 MiB tail gaps.
+     * - MADEIRA_FEX_SMALL_TOPDOWN=1: <=9MiB prefers top-down inside arena.
+     * - MADEIRA_FEX_ARENA_BANDS=1 (opt-in, extended-VA-off experiment): split the
+     *   published arena into large (low, preserves 16MiB-aligned runs) and
+     *   small/medium (high, <=9MiB and <16MiB-align requests) sub-bands. Each
+     *   placement tries its preferred band first, then falls back to the other
+     *   band/full arena so existing behavior remains a safety net. Bounds,
+     *   alignment, protection and view ownership are unchanged. */
     {
         const char *split = getenv( "MADEIRA_FEX_SMALL_TOPDOWN" );
+        const char *bands = getenv( "MADEIRA_FEX_ARENA_BANDS" );
         size_t alloc_sz = size;
         int is_fex_arena = ios_fex_arena_base_unix && limit_low < limit_high &&
                            (ULONG_PTR)limit_low >= ios_fex_arena_base_unix &&
                            (ULONG_PTR)limit_high <= ios_fex_arena_end_unix;
+        int use_bands = bands && !strcmp( bands, "1" ) && is_fex_arena;
 
         if (is_fex_arena && alloc_sz == 0x802000)
             alloc_sz = 0x810000;
+
+        int small_class = is_fex_arena && alloc_sz && alloc_sz <= 9u * 1024 * 1024 &&
+                          align_mask < 0xffffff; /* <16MiB alignment => small/medium */
+
+        if (use_bands)
+        {
+            ULONG_PTR arena_lo = (ULONG_PTR)limit_low;
+            ULONG_PTR arena_hi = (ULONG_PTR)limit_high;
+            ULONG_PTR arena_sz = arena_hi > arena_lo ? arena_hi - arena_lo : 0;
+            /* Reserve upper band for small/medium: min(512MiB, 25% of arena), 64KiB aligned. */
+            ULONG_PTR small_band = arena_sz / 4;
+            if (small_band > 512u * 1024 * 1024) small_band = 512u * 1024 * 1024;
+            if (small_band < 64u * 1024 * 1024 && arena_sz >= 128u * 1024 * 1024) small_band = 64u * 1024 * 1024;
+            small_band &= ~(ULONG_PTR)0xffff;
+            ULONG_PTR split_at = arena_hi > small_band ? arena_hi - small_band : 0;
+            split_at &= ~(ULONG_PTR)0xffff;
+            if (split_at <= arena_lo || split_at >= arena_hi) use_bands = 0;
+            else
+            {
+                void *lo1 = (void *)arena_lo, *hi1 = (void *)split_at;
+                void *lo2 = (void *)split_at, *hi2 = (void *)arena_hi;
+                void *slo = small_class ? lo2 : lo1, *shi = small_class ? hi2 : hi1;
+                void *olo = small_class ? lo1 : lo2, *ohi = small_class ? hi1 : hi2;
+                int std = small_class ? 1 : top_down;
+                int otd = small_class ? top_down : 1;
+
+                r = map_reserved_area_inner( slo, shi, alloc_sz, std, unix_prot, align_mask );
+                if (!r) r = map_reserved_area_inner( olo, ohi, alloc_sz, otd, unix_prot, align_mask );
+                if (!r) r = map_reserved_area_inner( limit_low, limit_high, alloc_sz, top_down, unix_prot, align_mask );
+                if (!r && alloc_sz != size)
+                {
+                    alloc_sz = size;
+                    r = map_reserved_area_inner( slo, shi, alloc_sz, std, unix_prot, align_mask );
+                    if (!r) r = map_reserved_area_inner( olo, ohi, alloc_sz, otd, unix_prot, align_mask );
+                    if (!r) r = map_reserved_area_inner( limit_low, limit_high, alloc_sz, top_down, unix_prot, align_mask );
+                }
+                {
+                    static unsigned logged;
+                    if (++logged <= 16)
+                        dprintf( 2, "[fex-arena-bands] want=0x%lx alloc=0x%lx align=0x%lx class=%s split=0x%lx result=%s\n",
+                                 (unsigned long)size, (unsigned long)alloc_sz,
+                                 (unsigned long)(align_mask + 1), small_class ? "small" : "large",
+                                 (unsigned long)split_at, r ? "placed" : "failed" );
+                }
+                goto fex_done;
+            }
+        }
 
         int segregate = split && !strcmp( split, "1" ) && !top_down &&
                         alloc_sz && alloc_sz <= 9u * 1024 * 1024 && is_fex_arena;
@@ -19650,6 +19911,7 @@ static void *map_reserved_area( void *limit_low, void *limit_high, size_t size, 
                          (unsigned long)(align_mask + 1), r ? "placed" : "failed" );
         }
     }
+fex_done:
     clock_gettime( CLOCK_MONOTONIC, &t1 );
     ms = (t1.tv_sec - t0.tv_sec) * 1000.0 + (t1.tv_nsec - t0.tv_nsec) / 1e6;
     if (ms > 250.0)
@@ -23815,6 +24077,7 @@ void virtual_init(void)
             mmap_add_reserved_area( (*preload_info)[i].addr, (*preload_info)[i].size );
 
     mmap_init( preload_info ? *preload_info : NULL );
+    ios_coderange_hole_init();
 
     if ((preload = getenv("WINEPRELOADRESERVE")))
     {
@@ -23861,14 +24124,20 @@ void virtual_init(void)
     if (ios_sc_layout_mode == 2) ios_cage_base = IOS_SC2_CAGE_BASE;
 
     /* ml433 (#72): hold back the only 8GB-aligned stretch in the guest band
-     * before top-down placement can put furniture in it — see IOS_CAGE_BASE. */
-    if (anon_mmap_fixed( (void *)(uintptr_t)IOS_CAGE_BASE, IOS_CAGE_REAL_SIZE, PROT_NONE, 0 ) != MAP_FAILED)
+     * before top-down placement can put furniture in it — see IOS_CAGE_BASE.
+     * Opt-out for extended_va=false 0x7200 conflict experiments. */
     {
-        ios_cage_holdback_live = 1;
-        dprintf( 2, "[cage] holdback reserved 0x%llx+0x%llx rev=ml433\n",
-                 (unsigned long long)IOS_CAGE_BASE, (unsigned long long)IOS_CAGE_REAL_SIZE );
+        const char *chb = getenv( "MADEIRA_CAGE_HOLDBACK" );
+        if (chb && !strcmp( chb, "0" ))
+            dprintf( 2, "[cage] holdback disabled by MADEIRA_CAGE_HOLDBACK=0 (0x7200 conflict experiment)\n" );
+        else if (anon_mmap_fixed( (void *)(uintptr_t)IOS_CAGE_BASE, IOS_CAGE_REAL_SIZE, PROT_NONE, 0 ) != MAP_FAILED)
+        {
+            ios_cage_holdback_live = 1;
+            dprintf( 2, "[cage] holdback reserved 0x%llx+0x%llx rev=ml433\n",
+                     (unsigned long long)IOS_CAGE_BASE, (unsigned long long)IOS_CAGE_REAL_SIZE );
+        }
+        else dprintf( 2, "[cage] holdback reserve FAILED (errno %d) rev=ml433\n", errno );
     }
-    else dprintf( 2, "[cage] holdback reserve FAILED (errno %d) rev=ml433\n", errno );
 
     /* Guest windows are reserved lazily; this reserves nothing unless a
      * 32-bit main image was published or MADEIRA_WOW_PLACEHOLDERS=1 (see
@@ -28020,6 +28289,22 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
         return result.virtual_alloc.status;
     }
 
+    /* ml462c: preserve near-libcef V8 CodeRange hole. Competing 512MB-ish
+     * reserve-only NOACCESS probes (bigres/cage) with hints in the hole steal
+     * the only contiguous window; drop their hint so Wine places elsewhere. */
+    if (ios_coderange_hole_live && !ios_coderange_hole_claiming && *ret
+        && (type & MEM_RESERVE) && !(type & MEM_COMMIT)
+        && protect == PAGE_NOACCESS
+        && *size_ptr >= 0x1ff00000 && *size_ptr <= 0x20200000
+        && ios_coderange_hole_overlaps( (uint64_t)(uintptr_t)*ret, *size_ptr ))
+    {
+        static unsigned n;
+        if (n++ < 12)
+            dprintf(2, "[coderange-hole] dropping competing hint %p size=0x%lx to preserve hole 0x%llx rev=ml462c\n",
+                    *ret, (unsigned long)*size_ptr, (unsigned long long)ios_coderange_hole_base);
+        *ret = NULL;
+    }
+
     if (!*ret)
         limit = get_zero_bits_limit( zero_bits );
     else
@@ -28451,13 +28736,16 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
              * jump distance of libcef's embedded builtins in the module band
              * (its own preferred hint 0x71e0000000 collides with loaded DLLs
              * and everything the kernel picks elsewhere gets rejected+released;
-             * ml461 looped this forever). Serve it from [0x7100000000,
-             * 0x71c0000000) — free space directly below the module band, ~1GB
-             * from the builtins. V8 redoes its own alignment two-step inside
-             * the zone (the aligned re-reserve arrives hinted and the normal
-             * path grants it). If the guest has already cycled 32 grants of
-             * this shape, placement cannot satisfy it — deny outright so V8
-             * fails NAMED in cef_log instead of eating the FEX band. */
+             * ml461 looped this forever). Serve it from near-builtins windows.
+             * V8 redoes its own alignment two-step inside the zone (the aligned
+             * re-reserve arrives hinted and the normal path grants it).
+             *
+             * extended_va=false (512GB map) + nocopy libcef can exhaust the
+             * primary 1GB zone. Try fallback windows within ~±2GB of libcef's
+             * typical builtin area (0x71e0db0000 observed) before failing. If no
+             * near-builtins window fits, FAIL honestly: do NOT fall through to
+             * the generic bigres steering valve, which places above ceiling/out
+             * of reach and causes V8 placement livelock. */
             if (!*ret && !limit && (type & MEM_RESERVE) && !(type & MEM_COMMIT)
                 && protect == PAGE_NOACCESS
                 && *size_ptr >= 0x20000000 && *size_ptr <= 0x20100000)
@@ -28467,30 +28755,80 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
                 static unsigned cr_logs;
                 if (cyc >= 32)
                 {
-                    if (cr_logs < 16)
+                    if (cr_logs < 24)
                         dprintf(2, "[coderange] DENY tid=%04x size=0x%lx cycles=%u — placement livelock, failing honestly rev=ml462\n",
                                 ctid, (unsigned long)*size_ptr, cyc);
                     cr_logs++;
                     return STATUS_NO_MEMORY;
                 }
                 {
+                    /* Fallbacks stay within ~2GB of 0x71e0000000 module/builtins
+                     * area, avoid [0x71e0000000,0x7200000000) where nocopy libcef
+                     * lives (0x71e0db0000+0xd3ca000 in capture-161952). */
+                    static const struct { ULONGLONG lo, hi; const char *name; } cr_zones[] = {
+                        { 0x7180000000ULL, 0x71c0000000ULL, "primary" },
+                        { 0x7140000000ULL, 0x7180000000ULL, "low" },
+                        /* 0x7200000000+ overlaps [cage] holdback (V8/cppgc guard
+                         * reservation, rev=ml433) and shows host EEXIST/no-views. */
+                        { 0x70c0000000ULL, 0x7100000000ULL, "below-low-far" },
+                        { 0x7100000000ULL, 0x7140000000ULL, "low-far" },
+                    };
                     SIZE_T cwant = *size_ptr;
                     void *csaved = *ret;
-                    /* ml463: floor raised 0x7100000000 -> 0x7180000000. The
-                     * ml462 run granted the zone BOTTOM (0x7100000000, ~3.5GB
-                     * from the builtins) and V8 cycled 4 more grant/release
-                     * rounds before settling — consistent with a ±2GB reach
-                     * check (acceptable floor ~0x7162000000). Start inside the
-                     * window so the first grant sticks. */
-                    NTSTATUS cst = allocate_virtual_memory( ret, size_ptr, type, protect,
-                                                            0x7180000000ULL, 0x71c0000000ULL, 0, 0 );
-                    if (cr_logs < 16)
-                        dprintf(2, "[coderange] #%u tid=%04x size=0x%lx cycles=%u -> %s %p rev=ml462\n",
-                                cr_logs, ctid, (unsigned long)cwant, cyc,
-                                cst ? "zone FULL, falling through" : "near-builtins zone", *ret);
+                    NTSTATUS cst = STATUS_NO_MEMORY;
+                    unsigned zi;
+                    uintptr_t chole = ios_coderange_hole_base;
+                    if (ios_coderange_hole_live && chole && cwant <= IOS_CODERANGE_HOLE_SIZE)
+                    {
+                        /* Claim pre-reserved near-libcef hole (protected from normal
+                         * bigres/cage-probe consumers). munmap host placeholder then
+                         * create Wine view at fixed base. */
+                        ios_coderange_hole_claiming = 1;
+                        (void)ios_coderange_hole_take(cwant);
+                        *ret = (void *)chole; *size_ptr = cwant;
+                        cst = allocate_virtual_memory( ret, size_ptr, type, protect,
+                                                       chole, chole + IOS_CODERANGE_HOLE_SIZE, 0, 0 );
+                        ios_coderange_hole_claiming = 0;
+                        if (!cst)
+                        {
+                            if (cr_logs < 24)
+                                dprintf(2, "[coderange] #%u tid=%04x size=0x%lx cycles=%u -> hole %p zone=coderange-hole rev=ml462c\n",
+                                        cr_logs, ctid, (unsigned long)cwant, cyc, *ret);
+                            cr_logs++;
+                            st = cst; ios_steered = 1;
+                            goto coderange_done;
+                        }
+                        dprintf(2, "[coderange-hole] claim failed st=0x%x; falling back to zone scan\n", (unsigned)cst);
+                        *ret = csaved; *size_ptr = cwant;
+                    }
+                    for (zi = 0; zi < sizeof(cr_zones)/sizeof(cr_zones[0]); zi++)
+                    {
+                        *ret = csaved; *size_ptr = cwant;
+                        cst = allocate_virtual_memory( ret, size_ptr, type, protect,
+                                                       cr_zones[zi].lo, cr_zones[zi].hi, 0, 0 );
+                        if (!cst)
+                        {
+                            if (cr_logs < 24)
+                                dprintf(2, "[coderange] #%u tid=%04x size=0x%lx cycles=%u -> %s %p zone=%s rev=ml462c\n",
+                                        cr_logs, ctid, (unsigned long)cwant, cyc, "near-builtins", *ret, cr_zones[zi].name);
+                            cr_logs++;
+                            st = cst; ios_steered = 1;
+                            goto coderange_done;
+                        }
+                    }
+                    if (cr_logs < 24)
+                        dprintf(2, "[coderange] #%u tid=%04x size=0x%lx cycles=%u -> FULL all-zones, failing (no out-of-reach steer) rev=ml462c\n",
+                                cr_logs, ctid, (unsigned long)cwant, cyc);
+                    if (cr_logs == 0 || cr_logs == 1 || cr_logs == 24)
+                        ios_coderange_census_near_libcef();
                     cr_logs++;
-                    if (!cst) { st = cst; ios_steered = 1; }
-                    else { *ret = csaved; *size_ptr = cwant; }
+                    *ret = csaved; *size_ptr = cwant;
+                    /* Block generic steering valve: out-of-reach placement is worse
+                     * than honest failure for V8 CodeRange reach constraints. */
+                    st = cst;
+                    ios_steered = 1;
+coderange_done:
+                    ;
                 }
             }
 
@@ -29381,6 +29719,16 @@ void ios_reserve_fex_arena(void)
             dprintf( 2, "[fex-arena] ml995 SKIP %s (%llu MB) -- over the %llu MB cap\n",
                      plan[i].what, (unsigned long long)plan[i].size >> 20,
                      arena_size_cap >> 20 );
+            continue;
+        }
+        /* extended-VA-off / constrained tasks: skip windows entirely above the
+         * measured task ceiling. Partial windows may still work and are handled
+         * by normal attempts plus the ceiling-aware fixed fallback below. */
+        if (arena_task_max && (unsigned long long)plan[i].lo >= arena_task_max)
+        {
+            dprintf( 2, "[fex-arena] SKIP %s -- window 0x%llx..0x%llx above task max 0x%llx\n",
+                     plan[i].what, (unsigned long long)plan[i].lo, (unsigned long long)plan[i].hi,
+                     arena_task_max );
             continue;
         }
         /* ml799: hold the range NATIVELY as PROT_NONE, with no Windows view.

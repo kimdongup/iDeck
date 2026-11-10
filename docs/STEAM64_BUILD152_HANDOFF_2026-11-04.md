@@ -1,5 +1,9 @@
 # Steam64 on iPhone — Build 99–152 investigation and engineering handoff
 
+**Closed, 2026-11-09 HST:** the user ended this investigation after unsuccessful
+attempts through Build217 and its bands variant. The plans and status below are
+historical. See the [final wrap-up](STEAM64_FINAL_WRAP_UP_2026-11-09.md).
+
 **Later investigation, 2026-11-06 HST:** source rebuilds and device tests now reach
 [Build184](STEAM64_BUILD184_COMPACT_CALLRET_2026-11-06.md), following
 [Build181–183](STEAM64_BUILDS181_183_SOURCE_RESULTS_2026-11-06.md).

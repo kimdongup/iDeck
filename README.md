@@ -1,5 +1,10 @@
 [English](README.md) · [简体中文](README.zh-CN.md)
 
+> **Investigation closed — 2026-11-09:** This Steam64 investigation did not
+> achieve validated end-to-end operation. Sources and experiments are retained
+> for reference; this is not a working Steam64 release. Earlier demos below
+> belong to historical experiments. See the [final wrap-up](docs/STEAM64_FINAL_WRAP_UP_2026-11-09.md).
+
 <p align="center">
   <img src="docs/assets/ideck/icon.png" width="156" alt="iDeck">
 </p>

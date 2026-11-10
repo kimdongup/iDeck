@@ -52,6 +52,8 @@ echo ""
 echo "=== Rebuilding libntdll_unix.a ==="
 # Update existing archive with recompiled objects
 if [ -f "$OBJ_DIR/libntdll_unix.a" ]; then
+    # Remove stale full-virtual duplicates that can shadow updated virtual.o.
+    ar d "$OBJ_DIR/libntdll_unix.a" virtual_ios.bands.o 2>/dev/null || true
     for obj in loader.o process.o server.o virtual.o signal_arm64.o sync.o; do
         ar d "$OBJ_DIR/libntdll_unix.a" "$obj" 2>/dev/null || true
         ar r "$OBJ_DIR/libntdll_unix.a" "$OBJ_DIR/$obj"

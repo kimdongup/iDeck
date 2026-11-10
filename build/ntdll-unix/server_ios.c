@@ -2895,16 +2895,56 @@ unsigned int server_call_unlocked( void *req_ptr )
 {
     struct __server_request_info * const req = req_ptr;
     unsigned int ret;
+    int _trace_req = 0;
+    unsigned int _req_id = req->u.req.request_header.req;
 
     ios_srv_req_count++;
 #ifdef WINE_IOS
+    {
+        static int _diag=-1; if(_diag<0){const char *e=getenv("MADEIRA_DIAG_INITDATA"); _diag=(e&&*e)?(*e=='2'?2:1):0;}
+        /* S1 shared address space: avoid cross-pid static cache flip-flop/noise. */
+        static __thread unsigned int _crashpad_tid_pid = 0;
+        static __thread int _is_crashpad = 0;
+        unsigned int _mypid = (unsigned)HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess);
+        if (_diag>=1 && _crashpad_tid_pid != _mypid) {
+            _crashpad_tid_pid = _mypid; _is_crashpad = 0;
+            TEB *teb = NtCurrentTeb();
+            RTL_USER_PROCESS_PARAMETERS *pp = teb && teb->Peb ? teb->Peb->ProcessParameters : NULL;
+            if (pp && pp->ImagePathName.Buffer) {
+                const WCHAR *img = pp->ImagePathName.Buffer;
+                size_t i, len = pp->ImagePathName.Length / sizeof(WCHAR);
+                static const WCHAR needle[] = {'c','r','a','s','h','p','a','d','_','h','a','n','d','l','e','r',0};
+                for (i = 0; i + 16 <= len; i++) {
+                    size_t j; int ok=1;
+                    for (j=0;j<16;j++) { WCHAR c=img[i+j]; if (c>='A'&&c<='Z') c+=32; if (c!=needle[j]) {ok=0;break;} }
+                    if (ok) { _is_crashpad=1; break; }
+                }
+            }
+            fprintf(stderr,"[initdata-inherit][srvcall-id] pid=%04x crashpad=%d\n", _mypid, _is_crashpad);
+        }
+        /* DIAG>=2: all reqs all processes. DIAG>=1: all reqs for crashpad_handler (__thread cached);
+         * non-crashpad broad fallback removed (was very noisy) - use DIAG>=2 for full capture. */
+        if (_diag>=2 || (_diag>=1 && _is_crashpad==1)) _trace_req=1;
+        if (_trace_req) { struct ntdll_thread_data *_td = ntdll_get_thread_data();
+            fprintf(stderr,"[initdata-inherit][srvcall-enter] pid=%04x tid=%04x req=%u cli_replyfd=%d cli_reqfd=%d\n",
+            (unsigned)HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess),(unsigned)HandleToULong(NtCurrentTeb()->ClientId.UniqueThread),_req_id,_td?_td->reply_fd:-1,_td?_td->request_fd:-1); }
+    }
     ios_bg_qos_check();   /* madeira-bcd: [bg-qos] */
     /* killed inside a section (ios_defer_section_abort): no more requests */
     if (ios_section_state() & IOS_SECTION_ABORT) return STATUS_THREAD_IS_TERMINATING;
     if (__atomic_load_n( &g_madeira_srv_direct, __ATOMIC_RELAXED ) > 0 && ios_srv_try_direct( req, &ret ))
+    {
+        if (_trace_req) fprintf(stderr,"[initdata-inherit][srvcall-exit] pid=%04x tid=%04x req=%u ret=%08x direct=1\n",
+            (unsigned)HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess),(unsigned)HandleToULong(NtCurrentTeb()->ClientId.UniqueThread),_req_id,ret);
         return ret;   /* madeira-bcd: MADEIRA_SRV_DIRECT */
+    }
 #endif
-    if ((ret = send_request( req ))) return ret;
+    if ((ret = send_request( req )))
+    {
+        if (_trace_req) fprintf(stderr,"[initdata-inherit][srvcall-exit] pid=%04x tid=%04x req=%u ret=%08x sendfail=1\n",
+            (unsigned)HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess),(unsigned)HandleToULong(NtCurrentTeb()->ClientId.UniqueThread),_req_id,ret);
+        return ret;
+    }
     /* iOS-Madeira 2026-07-05: kick the in-process server loop out of its
      * tick sleep so the request is picked up in ~50us instead of waiting
      * for the next 1ms iteration (fd_ios.c ios_srv_wake_sem). */
@@ -2914,7 +2954,10 @@ unsigned int server_call_unlocked( void *req_ptr )
         extern void ios_wineserver_ring( unsigned int tid );
         ios_wineserver_ring( HandleToULong( NtCurrentTeb()->ClientId.UniqueThread ) );
     }
-    return wait_reply( req );
+    ret = wait_reply( req );
+    if (_trace_req) fprintf(stderr,"[initdata-inherit][srvcall-exit] pid=%04x tid=%04x req=%u ret=%08x\n",
+        (unsigned)HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess),(unsigned)HandleToULong(NtCurrentTeb()->ClientId.UniqueThread),_req_id,ret);
+    return ret;
 }
 
 
@@ -4193,10 +4236,22 @@ int server_get_unix_fd( HANDLE handle, unsigned int wanted_access, int *unix_fd,
     wanted_access &= FILE_READ_DATA | FILE_WRITE_DATA | FILE_APPEND_DATA;
 
     ret = get_cached_fd( handle, &fd, type, &access, options );
-    if (ret != STATUS_INVALID_HANDLE) goto done;
+    if (ret != STATUS_INVALID_HANDLE)
+    {
+        static int diag = -1;
+        if (diag < 0) { const char *e = getenv("MADEIRA_DIAG_INITDATA"); diag = (e && *e && atoi(e) >= 2) ? 2 : (e && *e && *e != '0'); }
+        if (diag >= 2 && (ULONG_PTR)handle <= 0x400) dprintf(2, "[initdata-inherit][fdc] hit handle=%p status=%#x fd=%d peb=%p\n", handle, (unsigned)ret, fd, ios_jit_current_peb());
+        goto done;
+    }
 
     server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
     ret = get_cached_fd( handle, &fd, type, &access, options );
+    if (ret != STATUS_INVALID_HANDLE)
+    {
+        static int diag2 = -1;
+        if (diag2 < 0) { const char *e = getenv("MADEIRA_DIAG_INITDATA"); diag2 = (e && *e && atoi(e) >= 2) ? 2 : (e && *e && *e != '0'); }
+        if (diag2 >= 2 && (ULONG_PTR)handle <= 0x400) dprintf(2, "[initdata-inherit][fdc] hit2 handle=%p status=%#x fd=%d peb=%p\n", handle, (unsigned)ret, fd, ios_jit_current_peb());
+    }
     if (ret == STATUS_INVALID_HANDLE)
     {
 #ifdef WINE_IOS
@@ -4255,10 +4310,26 @@ int server_get_unix_fd( HANDLE handle, unsigned int wanted_access, int *unix_fd,
             }
         }
         SERVER_END_REQ;
+        if (ret)
+        {
+            static int initdata_diag = -1;
+            if (initdata_diag < 0) { const char *e = getenv("MADEIRA_DIAG_INITDATA"); initdata_diag = (e && *e && atoi(e) >= 2) ? 2 : (e && *e && *e != '0'); }
+            if (initdata_diag >= 2 || (initdata_diag >= 1 && wanted_access == 0 && (ULONG_PTR)handle <= 0x400))
+                dprintf(2, "[initdata-inherit][fd] server_get_unix_fd fail handle=%p wanted_access=0x%x status=%#x peb=%p\n",
+                        handle, wanted_access, (unsigned)ret, ios_jit_current_peb());
+        }
     }
     server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
 
 done:
+    if (ret)
+    {
+        static int initdata_diag_done = -1;
+        if (initdata_diag_done < 0) { const char *e = getenv("MADEIRA_DIAG_INITDATA"); initdata_diag_done = (e && *e && atoi(e) >= 2) ? 2 : (e && *e && *e != '0'); }
+        if (initdata_diag_done >= 2 && (ULONG_PTR)handle <= 0x400)
+            dprintf(2, "[initdata-inherit][fd] server_get_unix_fd -> handle=%p status=%#x peb=%p\n",
+                    handle, (unsigned)ret, ios_jit_current_peb());
+    }
     if (!ret && ((access & wanted_access) != wanted_access))
     {
         ret = STATUS_ACCESS_DENIED;
@@ -4345,7 +4416,7 @@ int server_pipe( int fd[2] )
 
     if (have_pipe2)
     {
-        if (!(ret = pipe2( fd, O_CLOEXEC ))) return ret;
+        if (!(ret = pipe2( fd, O_CLOEXEC ))) goto pipe_ok;
         if (errno == ENOSYS || errno == EINVAL) have_pipe2 = FALSE;  /* don't try again */
     }
 #endif
@@ -4354,7 +4425,15 @@ int server_pipe( int fd[2] )
         fcntl( fd[0], F_SETFD, FD_CLOEXEC );
         fcntl( fd[1], F_SETFD, FD_CLOEXEC );
     }
-    return ret;
+    if (ret) return ret;
+pipe_ok:
+#ifdef F_SETPIPE_SZ
+    /* Large read_process_memory replies (crashpad minidump) can be 100MB+; a bigger
+     * pipe buffer reduces POLLOUT wake cycles and helps replies complete before
+     * chrome_elf's crashpad watchdog. Best-effort (iOS may clamp/reject). */
+    { int _psz = 1024 * 1024; (void)fcntl( fd[1], F_SETPIPE_SZ, _psz ); }
+#endif
+    return 0;
 }
 
 

@@ -674,6 +674,8 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
 
     ERR("spawn_process: creating child thread for %s (fd=%d, unixdir=%d, dup_unixdir=%d)\n",
         debugstr_us(&params->CommandLine), socketfd, unixdir, args->unixdir);
+    dprintf(2, "spawn_process: creating child thread image=%s (fd=%d, unixdir=%d)\n",
+            debugstr_us(&params->ImagePathName), socketfd, unixdir);
 
     ret = pthread_create( &child_thread, NULL, ios_child_thread_entry, args );
     if (ret) {
@@ -1501,6 +1503,43 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
 #ifdef WINE_IOS
     ERR("NtCreateUserProcess: image=%s cmdline=%s\n",
         debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ));
+    dprintf(2, "NtCreateUserProcess: image=%s\n", debugstr_us( &params->ImagePathName ));
+    /* Crashpad/CEF IPC evidence (extended_va=false Build 217-bands): chrome_elf
+     * self-terminates after 60s "crash server did not respond" while our
+     * iDeckCEF64Crashpad\crashpad_handler.exe spawns. Capture the exact cmdline
+     * for crashpad/CEF-relevant processes to prove handler args/IPC setup. */
+    {
+        const WCHAR *img = params->ImagePathName.Buffer;
+        int imglen = params->ImagePathName.Length / sizeof(WCHAR);
+        int want = 0, i;
+        static const WCHAR crashpad_handlerW[] = {'c','r','a','s','h','p','a','d','_','h','a','n','d','l','e','r',0};
+        static const WCHAR chrome_elfW[] = {'c','h','r','o','m','e','_','e','l','f',0};
+        static const WCHAR steamwebhelperW[] = {'s','t','e','a','m','w','e','b','h','e','l','p','e','r',0};
+        if (img && imglen > 0)
+        {
+            for (i = 0; i < imglen - 15 && !want; i++)
+                if (!wcsnicmp( img + i, crashpad_handlerW, 16 )) want = 1;
+            for (i = 0; i < imglen - 9 && !want; i++)
+                if (!wcsnicmp( img + i, chrome_elfW, 10 )) want = 1;
+            for (i = 0; i < imglen - 13 && !want; i++)
+                if (!wcsnicmp( img + i, steamwebhelperW, 14 )) want = 1;
+        }
+        if (want)
+        {
+            /* debugstr_us truncates long cmdlines; log full bounded UTF-8 for IPC evidence. */
+            char cmdbuf[4096];
+            int clen = params->CommandLine.Length / sizeof(WCHAR);
+            int out = 0;
+            if (clen > 2047) clen = 2047;
+            if (params->CommandLine.Buffer && clen > 0)
+                out = ntdll_wcstoumbs( params->CommandLine.Buffer, clen, cmdbuf, sizeof(cmdbuf) - 1, FALSE );
+            if (out < 0) out = 0;
+            if (out >= (int)sizeof(cmdbuf)) out = (int)sizeof(cmdbuf) - 1;
+            cmdbuf[out] = 0;
+            dprintf(2, "NtCreateUserProcess.cmdline-evidence: image=%s cmdline_chars=%d cmdline=%s\n",
+                    debugstr_us( &params->ImagePathName ), params->CommandLine.Length / sizeof(WCHAR), cmdbuf);
+        }
+    }
 
     /* TEMP HACK (Steam S3 2026-07-10, task #29): refuse to spawn Steam's
      * minidump reporter. The reporter child hits the deep guest-exception-
@@ -2241,6 +2280,44 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
     wine_server_send_fd( socketfd[1] );
 
     /* create the process on the server side */
+
+#ifdef WINE_IOS
+    /* P1-B: handle-inheritance evidence for Crashpad InitialClientData.
+     * chrome_elf launches handler with bInheritHandles+STARTUPINFOEX handle list;
+     * cmdline carries --initial-client-data=<5 handles>,<3 client ptrs>. Prove
+     * whether PROCESS_CREATE_FLAGS_INHERIT_HANDLES/PS_ATTRIBUTE_HANDLE_LIST were
+     * honored and the listed handle values were sent to wineserver (same numeric
+     * values expected, if OBJ_INHERIT). Diagnostic only. */
+    {
+        const WCHAR *img = params->ImagePathName.Buffer;
+        int imglen = params->ImagePathName.Length / sizeof(WCHAR), wantcp = 0, i;
+        static const WCHAR crashpad_handlerW[] = {'c','r','a','s','h','p','a','d','_','h','a','n','d','l','e','r',0};
+        if (img && imglen > 0)
+            for (i = 0; i < imglen - 15 && !wantcp; i++)
+                if (!wcsnicmp( img + i, crashpad_handlerW, 16 )) wantcp = 1;
+        if (wantcp)
+        {
+            dprintf(2, "[initdata-inherit][ntdll] image=%s flags=%#x inherit_flag=%d handles_attr=%p handles_attr_size=%u handles_sent=%u jobs_sent=%u\n",
+                    debugstr_us( &params->ImagePathName ), (unsigned)process_flags,
+                    !!(process_flags & PROCESS_CREATE_FLAGS_INHERIT_HANDLES),
+                    handles_attr, handles_attr ? (unsigned)handles_attr->Size : 0u,
+                    (unsigned)handles_size, (unsigned)jobs_size);
+            if (handles_attr && handles_attr->ValuePtr && handles_attr->Size >= sizeof(HANDLE))
+            {
+                const HANDLE *hlist = handles_attr->ValuePtr;
+                SIZE_T hn = handles_attr->Size / sizeof(HANDLE), j;
+                for (j = 0; j < hn && j < 16; j++)
+                    dprintf(2, "[initdata-inherit][ntdll] attr[%u]=%p\n", (unsigned)j, hlist[j]);
+            }
+            if (handles && handles_size >= sizeof(handles[0]))
+            {
+                SIZE_T hn = handles_size / sizeof(handles[0]), j;
+                for (j = 0; j < hn && j < 16; j++)
+                    dprintf(2, "[initdata-inherit][ntdll] sent[%u]=%04x\n", (unsigned)j, (unsigned)handles[j]);
+            }
+        }
+    }
+#endif
 
     SERVER_START_REQ( new_process )
     {

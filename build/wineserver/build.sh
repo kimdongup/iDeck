@@ -109,6 +109,8 @@ PATCHED_FILES=(
     "hidparse_ios:$REPO_ROOT/build/hidpad/hidparse_ios.c:hidparse_ios.o"
     "storage_device_ios:storage_device_ios.c:storage_device_ios.o"
     "registry_ios:registry_ios.c:registry.o"
+    # U15: DIAG for crashpad first_pipe_instance FileNameInformation
+    "named_pipe:$WINE_SRC/server/named_pipe.c:named_pipe.o"
 )
 
 if [ ! -f "$OBJ_DIR/libwineserver.a" ]; then
@@ -204,6 +206,7 @@ REPLACEMENTS=(
     "hidparse_ios.o:hidparse_ios.o" # ml2101
     "storage_device_ios.o:storage_device_ios.o"
     "registry_ios.o:registry.o"
+    "named_pipe.o:named_pipe.o"     # U15
 )
 
 for entry in "${REPLACEMENTS[@]}"; do
