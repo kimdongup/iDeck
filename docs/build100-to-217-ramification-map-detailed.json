@@ -1,0 +1,4394 @@
+{
+  "schema": 1,
+  "title": "iDeck Build100–217 상세 분기·검증 지도",
+  "date": "2026-11-09",
+  "timezone": "Pacific/Honolulu",
+  "status": "목표 미달 · 조사 종료",
+  "source_map_sha256": "39866377a49290386c2114e2cba5fe7f889d5c50267fabf910e21a9dbd359b88",
+  "repository": "kimdongup/iDeck",
+  "base_revision": "eb923973c67e14746a1a56ebdd7c31c1ce74bc8d",
+  "lanes": {
+    "runtime": "PE·로더·프로세스",
+    "memory": "VA·FEX·소유권",
+    "cef": "CEF·ABI·리소스",
+    "ipc": "IPC·응답·watchdog 연계",
+    "render": "UI·paint·present",
+    "status": "종료/보존"
+  },
+  "phases": [
+    {
+      "id": "foundation",
+      "from_build": 100,
+      "to_build": 100,
+      "lane": "runtime",
+      "title": "런타임 조립과 빌드 게이트",
+      "change": "Wine/PE·vcruntime·DXMT·WoW64·JIT framework를 조립한다.",
+      "observed": "빌드·설치 감사 자료가 남아 있다.",
+      "limit": "각 단계의 개별 성공을 이후 Steam64 성공으로 연결하지 않는다.",
+      "parents": [],
+      "refs": [
+        "b100",
+        "handoff"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "pe-closure",
+      "from_build": 101,
+      "to_build": 123,
+      "lane": "runtime",
+      "title": "아키텍처별 PE closure",
+      "change": "ARM64(EC)와 i386 의존성·preflight·postbuild를 분리한다.",
+      "observed": "여러 빌드의 목록·진단 자료가 존재한다.",
+      "limit": "개별 빌드 변경이 확인되지 않은 번호는 갭으로 남긴다.",
+      "parents": [
+        "foundation"
+      ],
+      "refs": [
+        "b101"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "guards",
+      "from_build": 124,
+      "to_build": 142,
+      "lane": "runtime",
+      "title": "FEX guard·FD cache 경계",
+      "change": "CodeBuffer/guard와 cross-PEB FD cache를 계측한다.",
+      "observed": "Build124 changelog에 신규/기존 변경 구분이 있다.",
+      "limit": "125–142에 같은 수정이 계속됐다고 추정하지 않는다.",
+      "parents": [
+        "pe-closure"
+      ],
+      "refs": [
+        "b124"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "steam64",
+      "from_build": 143,
+      "to_build": 152,
+      "lane": "runtime",
+      "title": "Steam64 분기·handoff",
+      "change": "서명·PE loader·업데이트 실패를 분리한다.",
+      "observed": "Build152에서 provider 실패와 HTTP timeout이 기록됐다.",
+      "limit": "네트워크 전체 불능이나 CEF 성공을 뜻하지 않는다.",
+      "parents": [
+        "guards"
+      ],
+      "refs": [
+        "handoff"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "providers",
+      "from_build": 153,
+      "to_build": 157,
+      "lane": "runtime",
+      "title": "필수 모듈 공급",
+      "change": "CryptoAPI → WinSock → GUI/session → HTTP/text 순으로 closure를 보완한다.",
+      "observed": "153에서 provider 오류 감소·업데이트 완료;157에서 다음 큰 이미지 배치 실패.",
+      "limit": "선택적 DLL 탐색 실패까지 필수 원인으로 간주하지 않는다.",
+      "parents": [
+        "steam64"
+      ],
+      "refs": [
+        "providers"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "image",
+      "from_build": 158,
+      "to_build": 160,
+      "lane": "memory",
+      "title": "약212 MiB 이미지와 FEX 부족 분리",
+      "change": "기존 debugger-prepared C 영역에 CEF 이미지를 배치한다.",
+      "observed": "159의 약211.81 MiB 단일 이미지 배치가 기록됐다.",
+      "limit": "이미지 한 건의 성공 ≠ 전체 CEF 세션 용량.",
+      "parents": [
+        "providers"
+      ],
+      "refs": [
+        "image"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "arena",
+      "from_build": 161,
+      "to_build": 164,
+      "lane": "memory",
+      "title": "아레나 배치·CallRet·종료 회수",
+      "change": "FEX 배치·스택 예약·pseudo-process 회수 경계를 조사한다.",
+      "observed": "관련 소스·실기기 문서가 있다.",
+      "limit": "예약량·커밋량·물리 footprint는 서로 다른 수치다.",
+      "parents": [
+        "image"
+      ],
+      "refs": [
+        "layout",
+        "callret",
+        "reclaim"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "soft",
+      "from_build": 165,
+      "to_build": 176,
+      "lane": "memory",
+      "title": "Soft pool 승인·해제·안전 검사",
+      "change": "대형 예약의 가상 장부와 release/reaper 경로를 수정한다.",
+      "observed": "승인·반납·초기화 진전이 보고됐다.",
+      "limit": "soft grant만으로 실제 backing/향후 commit을 증명하지 않는다.",
+      "parents": [
+        "arena"
+      ],
+      "refs": [
+        "soft",
+        "171",
+        "174"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "overlap",
+      "from_build": 177,
+      "to_build": 178,
+      "lane": "memory",
+      "title": "중첩 범위 제거",
+      "change": "후보 주소의 실제 예약 범위·guard를 대조한다.",
+      "observed": "겹치는 두 soft range가 확인돼 후보 계산을 고쳤다.",
+      "limit": "장부 중첩 해결 ≠ native mapping 소유권 해결.",
+      "parents": [
+        "soft"
+      ],
+      "refs": [
+        "overlap"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "lifetime",
+      "from_build": 179,
+      "to_build": 179,
+      "lane": "memory",
+      "title": "큰 예약 수명 재생",
+      "change": "ALLOC/FREE와 프로세스 종료 회수를 함께 센다.",
+      "observed": "큰 예약71개가 live view와 대조됐다.",
+      "limit": "살아 있는 객체나 반환 가능한 빈 span census는 아니다.",
+      "parents": [
+        "overlap"
+      ],
+      "refs": [
+        "lifetime"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "fatal",
+      "from_build": 180,
+      "to_build": 181,
+      "lane": "cef",
+      "title": "CEF fatal의 실제 단계 분리",
+      "change": "fatal-site 계측 → pool 정렬 수정 순으로 시험한다.",
+      "observed": "180: address_pool_manager:58;181: page_allocator_internals_win:174.",
+      "limit": "실패 줄의 이동은 전체 초기화 성공이 아니다.",
+      "parents": [
+        "overlap"
+      ],
+      "refs": [
+        "180",
+        "181"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "buffers",
+      "from_build": 180,
+      "to_build": 184,
+      "lane": "memory",
+      "title": "FEX 버퍼 축소와 경계 일치",
+      "change": "decoder4096·IR half2 MiB·CallRet1 MiB의 사용/경계 검사를 맞춘다.",
+      "observed": "컴파일·호스트 검사·bounded 기기 적용이 확인됐다.",
+      "limit": "다른 게임·큰 workload의 최대치와 성능은 미보장.",
+      "parents": [
+        "lifetime"
+      ],
+      "refs": [
+        "180",
+        "181",
+        "184"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "ownership",
+      "from_build": 183,
+      "to_build": 184,
+      "lane": "memory",
+      "title": "실제 native hold 인수",
+      "change": "provider 소유권·PROT_NONE 전체 범위·원자적 claim을 확인한다.",
+      "observed": "183/184에서 slot ADOPT와 초기 ELF 실패 부재를 관측했다.",
+      "limit": "재시작 수명·다른 allocator 복사본까지 자동 해결되지 않는다.",
+      "parents": [
+        "fatal",
+        "buffers"
+      ],
+      "refs": [
+        "181",
+        "184"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "libcef",
+      "from_build": 184,
+      "to_build": 184,
+      "lane": "cef",
+      "title": "libcef 자체의 큰 pool",
+      "change": "ELF와 별도로 libcef의16 GiB급 요구 및32 GiB fallback을 구분한다.",
+      "observed": "libcef RVA0x6923404의 VA 실패 경로라는 추론이 정리됐다.",
+      "limit": "32 GiB를 실제 RAM 수요로 읽지 않는다.",
+      "parents": [
+        "ownership"
+      ],
+      "refs": [
+        "184"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "abi",
+      "from_build": 184,
+      "to_build": 185,
+      "lane": "cef",
+      "title": "전체 CEF 소스 재빌드의 ABI 게이트",
+      "change": "실제 DLL hash/version/API와 공개 CEF pin을 비교한다.",
+      "observed": "서로 다른 C API hash;1 GiB source 후보와 Windows probe 준비.",
+      "limit": "Windows full CEF 미빌드. 공개 소스를 즉시 교체 DLL로 인정할 수 없다.",
+      "parents": [
+        "libcef"
+      ],
+      "refs": [
+        "abi"
+      ],
+      "state": "open"
+    },
+    {
+      "id": "compact",
+      "from_build": 185,
+      "to_build": 188,
+      "lane": "memory",
+      "title": "compact hold와 높은 FEX 영역",
+      "change": "작은 CEF/V8 slot과 arena ladder/high-window를 시험한다.",
+      "observed": "188에도 FEX 실패가 남았고 설정별 IR 용량 차이가 있다.",
+      "limit": "slot 이름만으로 전체 inline mask의 의미적 일치를 증명하지 않는다.",
+      "parents": [
+        "libcef",
+        "buffers"
+      ],
+      "refs": [
+        "review",
+        "close"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "entitlement",
+      "from_build": 189,
+      "to_build": 189,
+      "lane": "memory",
+      "title": "서명 상태와 주소 상한 변화",
+      "change": "profile이 허용한 increased-memory-limit를 앱 서명에 유지한다.",
+      "observed": "런타임 increased=true / EVA=false,512 GiB 상한·16 GiB FEX를 기록했다.",
+      "limit": "모든 무료 계정의 동일 발급·동작을 증명하지 않는다.",
+      "parents": [
+        "compact"
+      ],
+      "refs": [
+        "ent",
+        "review"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "imports",
+      "from_build": 190,
+      "to_build": 192,
+      "lane": "runtime",
+      "title": "CEF delay-load 의존성",
+      "change": "powrprof·wevtapi·dxgi 후보를 배치한다.",
+      "observed": "패키징 설명과 캡처가 있다.",
+      "limit": "export 존재 ≠ 해당 API의 의미적 구현.",
+      "parents": [
+        "entitlement"
+      ],
+      "refs": [
+        "review"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "stack",
+      "from_build": 193,
+      "to_build": 197,
+      "lane": "runtime",
+      "title": "wake·stack·예외 경로",
+      "change": "fault frame/stack 크기와 RtlWakeAddressAll 구현을 대조한다.",
+      "observed": "후속 후보에서 exception 형태가 변했다.",
+      "limit": "한 증상 감소를 해당 수정의 단독 인과 효과로 단정하지 않는다.",
+      "parents": [
+        "imports"
+      ],
+      "refs": [
+        "review"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "resource",
+      "from_build": 198,
+      "to_build": 204,
+      "lane": "cef",
+      "title": "ResourceBundle·vtable·Crashpad 후보",
+      "change": "재귀·callback·exception dispatcher와 진단 frame walk를 수정/우회한다.",
+      "observed": "패키지별 libcef hash와 패치 검사가 남아 있다.",
+      "limit": "크래시 회피 ≠ 올바른 리소스 공급; ABI·pack·handler 의미는 별도.",
+      "parents": [
+        "stack",
+        "abi"
+      ],
+      "refs": [
+        "review"
+      ],
+      "state": "open"
+    },
+    {
+      "id": "render",
+      "from_build": 198,
+      "to_build": 216,
+      "lane": "render",
+      "title": "창·surface·occlusion·present",
+      "change": "visible/occlusion와 paint 전달, 프로파일러·worker 상태를 분리한다.",
+      "observed": "204에서1068×492 visible 창·동일 HWND present4회가 기록됐다.",
+      "limit": "창·픽셀 갱신만으로 CEF 콘텐츠나 로그인 성공을 판단하지 않는다.",
+      "parents": [
+        "resource"
+      ],
+      "refs": [
+        "review",
+        "close"
+      ],
+      "state": "open"
+    },
+    {
+      "id": "assertion",
+      "from_build": 205,
+      "to_build": 210,
+      "lane": "cef",
+      "title": "telemetry assertion·더 큰 stack·재귀 진단",
+      "change": "여러 binary 후보와64/128 MiB stack floor, recursion 계측을 시험한다.",
+      "observed": "패키징 스크립트는 변경 의도를 설명한다.",
+      "limit": "Eliminate/Fix라는 스크립트 제목은 성공 판정이 아니다.",
+      "parents": [
+        "resource"
+      ],
+      "refs": [
+        "close"
+      ],
+      "state": "open"
+    },
+    {
+      "id": "ipc",
+      "from_build": 211,
+      "to_build": 216,
+      "lane": "ipc",
+      "title": "SteamChrome mapping·event·suspend",
+      "change": "IPC mapping collision·OBJ_OPENIF·event/alert·worker init을 조사한다.",
+      "observed": "212/213/216 커밋·패키지 계보가 있다.",
+      "limit": "정상 응답·대기·교착의 전체 의미 검증은 미완료.",
+      "parents": [
+        "assertion",
+        "render"
+      ],
+      "refs": [
+        "close"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "reclaim",
+      "from_build": 217,
+      "to_build": 217,
+      "lane": "memory",
+      "title": "dead-view 회수 목적과 startup 회귀",
+      "change": "non-FEX guest view를 먼저 회수하고 straddler는 보존한다.",
+      "observed": "기본217은 cmd preamble에서 멈춰 회수/재기동 검증에 도달하지 못했다.",
+      "limit": "코드·빌드 성공과 실제 reclaim 검증을 분리한다.",
+      "parents": [
+        "ipc",
+        "ownership"
+      ],
+      "refs": [
+        "b217"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "startup",
+      "from_build": 217,
+      "to_build": 217,
+      "lane": "runtime",
+      "title": "bands: start/config_guard 분리",
+      "change": "start.exe를 제거하고 config_guard를 opt-in으로 둔다.",
+      "observed": "후속 보고에 cmd→steam→webhelper와 V1/V2/V3가 기록됐다.",
+      "limit": "일반217 캡처에 후속 bands 성과를 소급하지 않는다.",
+      "parents": [
+        "reclaim"
+      ],
+      "refs": [
+        "u"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "coderange",
+      "from_build": 217,
+      "to_build": 217,
+      "lane": "memory",
+      "title": "P4: near-builtins CodeRange hole",
+      "change": "513 MB placeholder 보호·claim·정직한 fallback 실패를 분리한다.",
+      "observed": "ml462c hole #0 재사용이 U28·U34–U38에 보고됐다.",
+      "limit": "P4의 관측 성공 ≠ 전체 UI/프로세스 안정성.",
+      "parents": [
+        "startup",
+        "compact"
+      ],
+      "refs": [
+        "u",
+        "final"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "transport",
+      "from_build": 217,
+      "to_build": 217,
+      "lane": "ipc",
+      "title": "P1: request 식별·FD·큰 reply",
+      "change": "req84=read_process_memory를 정정하고 EAGAIN/POLLOUT drain을 검증한다.",
+      "observed": "U34–U37의 FD pairing·완료 기록으로 일부 H1/H5 가설이 배제됐다.",
+      "limit": "그 케이스의 전달 완료 ≠ 전체 IPC 프로토콜의 무결성.",
+      "parents": [
+        "startup",
+        "ipc"
+      ],
+      "refs": [
+        "u",
+        "final"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "watchdog",
+      "from_build": 217,
+      "to_build": 217,
+      "lane": "cef",
+      "title": "잔존: minidump 작업량과60초 watchdog",
+      "change": "Mach 메모리 읽기와 reply 전달 누적 시간, watchdog 종료 순서를 대조한다.",
+      "observed": "보존 보고는 약 134 MB × N의 반복 메모리 읽기와 60초 대기/TerminateProcess 경로를 연결한다.",
+      "limit": "보고된 종결 가설이다. 최초 덤프 유발 원인이나 모든 대안의 불가능성을 증명한 것은 아니다.",
+      "parents": [
+        "transport"
+      ],
+      "refs": [
+        "final"
+      ],
+      "state": "blocked"
+    },
+    {
+      "id": "p3",
+      "from_build": 217,
+      "to_build": 217,
+      "lane": "cef",
+      "title": "P3: 종료 뒤 PC를 독립 원인에서 분리",
+      "change": "runtime base와chrome_elf+0xd4223을 실제 함수 경로에 연결한다.",
+      "observed": "보존 REA 보고는 TerminateProcess 직후 unwind artifact로 분류한다.",
+      "limit": "이번 맵 제작에서 새 decompile/기기 재현을 한 것은 아니다.",
+      "parents": [
+        "watchdog"
+      ],
+      "refs": [
+        "final"
+      ],
+      "state": "partial"
+    },
+    {
+      "id": "p2",
+      "from_build": 217,
+      "to_build": 217,
+      "lane": "render",
+      "title": "P2: DLW 생성과 생존을 구분",
+      "change": "FirstPaint/LoadEnd·DesktopLoginWindow를 현재 세션 시간과 대조한다.",
+      "observed": "일부 실행의 생성/생존은 보고됐지만 watchdog과 함께 변동한다.",
+      "limit": "오래된 로그의 DLW 한 줄을 현재 실행의 로그인 성공으로 쓰지 않는다.",
+      "parents": [
+        "coderange",
+        "watchdog"
+      ],
+      "refs": [
+        "u",
+        "final"
+      ],
+      "state": "open"
+    },
+    {
+      "id": "wrapup",
+      "from_build": 217,
+      "to_build": 217,
+      "lane": "status",
+      "title": "조사 종료: 목표 미달",
+      "change": "실험 소스·검사·근거 경계·서브모듈 pin을 보존한다.",
+      "observed": "사용자 요청으로 조사 종료 및GitHub 게시 완료.",
+      "limit": "종료는 원천 불가능 판정이나 성공 릴리스가 아니다.",
+      "parents": [
+        "p2",
+        "p3"
+      ],
+      "refs": [
+        "close"
+      ],
+      "state": "closed"
+    }
+  ],
+  "builds": [
+    {
+      "number": 100,
+      "variant": "base",
+      "title": "런타임 기반과 빌드 gate",
+      "intent": "Wine/PE·vcruntime·DXMT·JIT 입력 조립",
+      "observed": "진단 문서와 설치 감사 자료 존재",
+      "limit": "전체Steam64성과로해석불가",
+      "refs": [
+        "b100",
+        "handoff"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 101,
+      "variant": "base",
+      "title": "PE 준비·컴파일 상태",
+      "intent": "후속 PE closure 기반 마련",
+      "observed": "준비/컴파일 문서 존재",
+      "limit": "개별성공범위는원문기준",
+      "refs": [
+        "b101"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 102,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 103,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 104,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 105,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 106,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 107,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 108,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 109,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 110,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 111,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 112,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 113,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 114,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 115,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 116,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 117,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 118,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 119,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 120,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 121,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 122,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 123,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 124,
+      "variant": "base",
+      "title": "CodeBuffer/FD guard 계측",
+      "intent": "FEX guard와cross-PEB FD cache opt-in",
+      "observed": "changelog에신규/기존패치와빌드구분",
+      "limit": "guard계측은CEF안정성수정이아님",
+      "refs": [
+        "b124"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 125,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 126,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 127,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 128,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 129,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 130,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 131,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 132,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 133,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 134,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 135,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 136,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 137,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 138,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 139,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 140,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 141,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 142,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 143,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 144,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "gap",
+      "artifact_directory": false,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 145,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 146,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 147,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 148,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 149,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 150,
+      "variant": "base",
+      "title": "Steam64 업데이트·provider 진단",
+      "intent": "HTTP timeout과암호provider/PE로드를분리",
+      "observed": "handoff에호출·네트워크·로그근거기록",
+      "limit": "연관성을단일원인으로확정하지않음",
+      "refs": [
+        "handoff"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 151,
+      "variant": "base",
+      "title": "Steam64 업데이트·provider 진단",
+      "intent": "HTTP timeout과암호provider/PE로드를분리",
+      "observed": "handoff에호출·네트워크·로그근거기록",
+      "limit": "연관성을단일원인으로확정하지않음",
+      "refs": [
+        "handoff"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 152,
+      "variant": "base",
+      "title": "Steam64 업데이트·provider 진단",
+      "intent": "HTTP timeout과암호provider/PE로드를분리",
+      "observed": "handoff에호출·네트워크·로그근거기록",
+      "limit": "연관성을단일원인으로확정하지않음",
+      "refs": [
+        "handoff"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 153,
+      "variant": "base",
+      "title": "CryptoAPI provider",
+      "intent": "rsaenh·dssenh 공급",
+      "observed": "provider오류감소·업데이트완료",
+      "limit": "로그인수용미달",
+      "refs": [
+        "providers"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 7,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build153-artifacts/package-manifest.json",
+          "sha256": "48691567fc4f63ad3e1de1a896320a9e898e53421ce8579040868174221bd76b"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 60356,
+        "short_le_100_lines": 2,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "9336cfbd6a970bd8bbd2bffb345c85ce95bfd56ce1c9173988e67e64446245f9",
+      "packager_note_present": false
+    },
+    {
+      "number": 154,
+      "variant": "base",
+      "title": "WinSock closure 감사",
+      "intent": "ncrypt·wsock32 공급",
+      "observed": "설치했으나mswsock누락으로의도적으로실행하지않음",
+      "limit": "로그인수용미달",
+      "refs": [
+        "providers"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 0,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build154-artifacts/package-manifest.json",
+          "sha256": "8dde1f8ba23d3e57841acbaefe4088042d98048a7926eb03fc73aed5ef9bd585"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "2b791815492aa8f9bc1676dc526ce307b5f7597a6dc3ebe316412e9f6d3a70b0",
+      "packager_note_present": false
+    },
+    {
+      "number": 155,
+      "variant": "base",
+      "title": "forwarder 의존성",
+      "intent": "mswsock 공급",
+      "observed": "ncrypt/WinSock다음GUI모듈실패",
+      "limit": "로그인수용미달",
+      "refs": [
+        "providers"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build155-artifacts/package-manifest.json",
+          "sha256": "da9957b4b7c8fc6e25de60cc7671b0ead00bddb9a8670447a7841f9ef8283634"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 32520,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "8fcbf2b6482354a8e3de9cfb3993e26c3303da9dc868b217e020376399ec1bfe",
+      "packager_note_present": false
+    },
+    {
+      "number": 156,
+      "variant": "base",
+      "title": "GUI/session 의존성",
+      "intent": "msimg32·OpenGL·wtsapi32·dwmapi",
+      "observed": "webhelper시작,HTTP/text누락잔존",
+      "limit": "로그인수용미달",
+      "refs": [
+        "providers"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build156-artifacts/package-manifest.json",
+          "sha256": "59b2ba8b42024335050cf715e7e37c1ac2721fef202bdb9aa4e17138d21a4c54"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 38963,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "8d9ed9f0c79d4132fc018170b4c3be2a7364b043ef03fc515e5b429eeb8664be",
+      "packager_note_present": false
+    },
+    {
+      "number": 157,
+      "variant": "base",
+      "title": "HTTP/text와큰이미지",
+      "intent": "WinHTTP·DWrite·schannel",
+      "observed": "초기libcef매핑후추가큰이미지배치실패",
+      "limit": "로그인수용미달",
+      "refs": [
+        "providers"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 2,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build157-artifacts/package-manifest.json",
+          "sha256": "fcb6bd410a068e27cd60d83fcc3581249217ed6ff1e404bf3a84823f1edbdd81"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 146452,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "0f2d100cf8357b9d9b71c216e10aacff8081ff39fb1e231db31e0e9246c86781",
+      "packager_note_present": false
+    },
+    {
+      "number": 158,
+      "variant": "base",
+      "title": "선택적메모리권한제외",
+      "intent": "실행이미지부족과FEX연속부족을분리",
+      "observed": "동일패키지재실행에배치차이;FEX실패잔존",
+      "limit": "전체브라우저·반복실행성공미확인",
+      "refs": [
+        "image"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 3,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build158-artifacts/package-manifest.json",
+          "sha256": "363527c5ed2a84c1859c494db453b69e9f1b295be6483be06973390abbc83fbf"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 69561,
+        "short_le_100_lines": 1,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "8f9e95b63edeca08b83228e50394791654923e6c620a171797f796fb92abbd9f",
+      "packager_note_present": false
+    },
+    {
+      "number": 159,
+      "variant": "base",
+      "title": "CEF이미지region C배치",
+      "intent": "실행이미지부족과FEX연속부족을분리",
+      "observed": "약211.81 MiB단일이미지배치기록",
+      "limit": "전체브라우저·반복실행성공미확인",
+      "refs": [
+        "image"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build159-artifacts/package-manifest.json",
+          "sha256": "23ad38ff9a9c2cfa359441f8146094f78796b8b74f5664b424a1420db901d62e"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 85771,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "8f760c06db9fe0c9becd743475ccc1d32e4fbb07d92f5d9d5a4f071fb32e8e26",
+      "packager_note_present": false
+    },
+    {
+      "number": 160,
+      "variant": "base",
+      "title": "3 GiB arena rung",
+      "intent": "실행이미지부족과FEX연속부족을분리",
+      "observed": "큰아레나배치후속비교",
+      "limit": "전체브라우저·반복실행성공미확인",
+      "refs": [
+        "image"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 4,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build160-artifacts/package-manifest.json",
+          "sha256": "6597c2e4888579d8f2479279c5e50f0c52777e2dd2b906703f8e75c70784ce6a"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 58461,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "7e74bb68fc8917d8a840e5f422b8183450c8bd30fc4af101dd9c7d59d0d9c1a0",
+      "packager_note_present": false
+    },
+    {
+      "number": 161,
+      "variant": "base",
+      "title": "FEX배치",
+      "intent": "주소배치/스택/회수범위를조사",
+      "observed": "상세후속문서존재",
+      "limit": "메모리전체해결아님",
+      "refs": [
+        "layout"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build161-artifacts/package-manifest.json",
+          "sha256": "57ebf8cffae5813166da03b6502eb3a0fdd49fd1a5ebf3cb2a4493e972a9cab0"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 46007,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "dda5b788f2b12bb7edc8fb3f309305258487d7e85fbd83db6d4301ce888ca2ef",
+      "packager_note_present": false
+    },
+    {
+      "number": 162,
+      "variant": "base",
+      "title": "CallRet경계",
+      "intent": "주소배치/스택/회수범위를조사",
+      "observed": "상세후속문서존재",
+      "limit": "메모리전체해결아님",
+      "refs": [
+        "callret"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build162-artifacts/package-manifest.json",
+          "sha256": "c12fa7d60895791127fc54c8291330438d1db8829eba9bbf897992a642e56f7b"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 48820,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "2f4dce3ea0ad4ebf07be3bff781409f8efa339000c7619a2dc3d8092c5e2937b",
+      "packager_note_present": false
+    },
+    {
+      "number": 163,
+      "variant": "base",
+      "title": "프로세스회수",
+      "intent": "주소배치/스택/회수범위를조사",
+      "observed": "상세후속문서존재",
+      "limit": "메모리전체해결아님",
+      "refs": [
+        "reclaim"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build163-artifacts/package-manifest.json",
+          "sha256": "8a11060485022640f222a70532c3d184290e7607ea2159cc7d98349e3dd26d0b"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 52657,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "16d90fcf85c21105522c8bf54c4d03b1380ba6cfee80780395a3cad51dc6c15a",
+      "packager_note_present": false
+    },
+    {
+      "number": 164,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build164-artifacts/package-manifest.json",
+          "sha256": "abf9d8785e44a0cf7278d671dd87d2238ce4367d18758e51927bc0c23b151e09"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 54632,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "cd3d06600140a3a368733632096fc5f0a0dda80b9c65641ad339e2fed70cdf4c",
+      "packager_note_present": false
+    },
+    {
+      "number": 165,
+      "variant": "base",
+      "title": "loader내패치·soft범위",
+      "intent": "논리pool예약·해제경로진전",
+      "observed": "보고서에승인/해제/후속breakpoint기록",
+      "limit": "soft성공응답이native backing증거는아님",
+      "refs": [
+        "soft"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build165-artifacts/package-manifest.json",
+          "sha256": "c9907aa8ec7f9beb01a85e87942042781e45041c79e7eb4cc04b3673cf486a72"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 56743,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "e00b86b229ce8c6c0fade1cf981c2dbd017df4500f44ad675fc26a7a022cffd3",
+      "packager_note_present": false
+    },
+    {
+      "number": 166,
+      "variant": "base",
+      "title": "soft MEM_RELEASE",
+      "intent": "논리pool예약·해제경로진전",
+      "observed": "보고서에승인/해제/후속breakpoint기록",
+      "limit": "soft성공응답이native backing증거는아님",
+      "refs": [
+        "soft"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 2,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build166-artifacts/package-manifest.json",
+          "sha256": "048d399852a89875f6988f95e88fd415367f6a6acef6ab1ab3d6c2d8a6759df2"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 58995,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "73e3baa22544ddab3c02ea5ed9c775193b133a5447414b77631f892e3a8300ce",
+      "packager_note_present": false
+    },
+    {
+      "number": 167,
+      "variant": "base",
+      "title": "soft영역invalidation분리",
+      "intent": "논리pool예약·해제경로진전",
+      "observed": "보고서에승인/해제/후속breakpoint기록",
+      "limit": "soft성공응답이native backing증거는아님",
+      "refs": [
+        "soft"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 2,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build167-artifacts/package-manifest.json",
+          "sha256": "eaebc6469b4ce663bc241b845ad358d00fb41acad3f89ebcf9da06741b56b0f7"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 58995,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "104e4274e0a6bf6d85cf5efb0b4c6241bb026b87cdfa731882d700fd00c74822",
+      "packager_note_present": false
+    },
+    {
+      "number": 168,
+      "variant": "base",
+      "title": "unhinted jumbo fallback",
+      "intent": "논리pool예약·해제경로진전",
+      "observed": "보고서에승인/해제/후속breakpoint기록",
+      "limit": "soft성공응답이native backing증거는아님",
+      "refs": [
+        "soft"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 3,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build168-artifacts/package-manifest.json",
+          "sha256": "430ea2696827ece0ba9058be831144fb9804818ea14237e4f06fb576061d8d7a"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 58995,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "4bdc1d93b195951d29b460cdd377bbfdd676ddb579ee0e36d857d97d09c71f87",
+      "packager_note_present": false
+    },
+    {
+      "number": 169,
+      "variant": "base",
+      "title": "fallback 후초기화",
+      "intent": "논리pool예약·해제경로진전",
+      "observed": "보고서에승인/해제/후속breakpoint기록",
+      "limit": "soft성공응답이native backing증거는아님",
+      "refs": [
+        "soft"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 3,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build169-artifacts/package-manifest.json",
+          "sha256": "8ad5975421eaf5d2c31241d04bc14df6b2ef45d1aba3dfb0058f2177a3c0c2f2"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 58995,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "ee0c1efc1290964a8e5d71fcb8d2c2a5b366ab2acdef07f41caa2d9184c6cd9f",
+      "packager_note_present": false
+    },
+    {
+      "number": 170,
+      "variant": "base",
+      "title": "개별 변경 복원 갭",
+      "intent": "빌드 번호만으로 변경 의도나 이전 후보 상속을 추정하지 않는다.",
+      "observed": "목록 확인 범위만 아래 표시한다.",
+      "limit": "개별 변경·실행 결과 미확정.",
+      "refs": [],
+      "quality": "inventory",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 0,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build170-artifacts/package-build170.py",
+          "sha256": "f1bd408433122ceb91928d9513a01be2c99f3aaa7aaaefb4feb6116075ce386b"
+        },
+        {
+          "path": "build170-artifacts/package-manifest.json",
+          "sha256": "2405374a736e3cfa2e82c14e92f92e9acbd79bb86a3cc4d0e36318228eac4d4f"
+        }
+      ],
+      "packager_intent": "Repackage Build169 as Build170 with updated libntdll_unix.a, Steam64Compatibility, and Steam64Packages.json.",
+      "capture_summary": {
+        "max_lines": 0,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "4298ffbd81035ebc48768e6d44743ae8fd35bb1101b40d5593658675aed8259e",
+      "packager_note_present": false
+    },
+    {
+      "number": 171,
+      "variant": "base",
+      "title": "pool 초기화와FEX 포화",
+      "intent": "CEF초기화·FEX아레나배치를비교",
+      "observed": "해당보고에bounded초기화진전/포화기록",
+      "limit": "당시문서의해결표현은최종성공이아님",
+      "refs": [
+        "171"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 3,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build171-artifacts/package-build171.py",
+          "sha256": "519469dee6977a651342b57cbe7d44a3c69d9c8ac7cfb167ddc2e5cbccc49bc4"
+        },
+        {
+          "path": "build171-artifacts/package-manifest.json",
+          "sha256": "4b63757b5a1d752ff9fc65d141d0a10f81438a80a5d7810ed672aa448314a653"
+        }
+      ],
+      "packager_intent": "Package Build 171 as iDeck-Build171-SourceCEFFix.ipa with restricted entitlements.",
+      "capture_summary": {
+        "max_lines": 5363,
+        "short_le_100_lines": 1,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "5b981f88a0bae275837ab470ba817c0795de3da57c5f616416c2f8f653730d7d",
+      "packager_note_present": false
+    },
+    {
+      "number": 172,
+      "variant": "base",
+      "title": "pool 초기화와FEX 포화",
+      "intent": "CEF초기화·FEX아레나배치를비교",
+      "observed": "해당보고에bounded초기화진전/포화기록",
+      "limit": "당시문서의해결표현은최종성공이아님",
+      "refs": [
+        "171"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 6,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build172-artifacts/package-build172.py",
+          "sha256": "1eb23394f739a152899e514f9b117bfc9471d0a53d652f75f3e1b4e7f0ddb625"
+        },
+        {
+          "path": "build172-artifacts/package-manifest.json",
+          "sha256": "4d11cc485fab5af10e485d219d438b038eafa3f5f012a4f9da69690e886d251c"
+        }
+      ],
+      "packager_intent": "Package Build 172 as iDeck-Build172-SourceCEFFix.ipa with restricted entitlements.",
+      "capture_summary": {
+        "max_lines": 15613,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "6c1e19af39e6e3dfae52c5f6fe90d79e0f80641cdcd062b6eb7ddacb2749754d",
+      "packager_note_present": false
+    },
+    {
+      "number": 173,
+      "variant": "base",
+      "title": "pool 초기화와FEX 포화",
+      "intent": "CEF초기화·FEX아레나배치를비교",
+      "observed": "해당보고에bounded초기화진전/포화기록",
+      "limit": "당시문서의해결표현은최종성공이아님",
+      "refs": [
+        "171"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build173-artifacts/package-build173.py",
+          "sha256": "031bd2c756064e933418ecca64e9de34440e6f7450c5a9988b5a5239ead41852"
+        },
+        {
+          "path": "build173-artifacts/package-manifest.json",
+          "sha256": "aa14f2a7171bca1056d2ff48874e681d72cd7e322c13fd61de78ca11c481c72e"
+        }
+      ],
+      "packager_intent": "Package Build 173 as iDeck-Build173-FEX2GBArena.ipa with full code signature on all frameworks and dylibs.",
+      "capture_summary": {
+        "max_lines": 13237,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "7a514bdc8062692f9306dd54895fef0e5241a9f618fffdde4d5b98bd4809067c",
+      "packager_note_present": false
+    },
+    {
+      "number": 174,
+      "variant": "base",
+      "title": "OpDispatcher예약",
+      "intent": "예약단위/반납/안전한메모리검사를조정",
+      "observed": "분석·패키지·실기기기록존재",
+      "limit": "전체CEF초기화미확정",
+      "refs": [
+        "174"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build174-artifacts/package-build174.py",
+          "sha256": "cdc284b993bfbfe84f8167597a89427e39bff0c6812c8e1057d079180055cfd0"
+        },
+        {
+          "path": "build174-artifacts/package-manifest.json",
+          "sha256": "492e79cc50a1885eba79bc179c00a8633149c0ff9eac7c0121a74ac164a2b613"
+        }
+      ],
+      "packager_intent": "Package Build 174 as iDeck-Build174-FEX1400MB.ipa with full code signature on all frameworks and dylibs.",
+      "capture_summary": {
+        "max_lines": 12994,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "2351b9c82a42128e74a64fd1cd471fe6b6c687be45048e7bcfa88c7bfb528308",
+      "packager_note_present": false
+    },
+    {
+      "number": 175,
+      "variant": "base",
+      "title": "1 GiB soft pool",
+      "intent": "예약단위/반납/안전한메모리검사를조정",
+      "observed": "분석·패키지·실기기기록존재",
+      "limit": "전체CEF초기화미확정",
+      "refs": [
+        "174"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 2,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build175-artifacts/package-build175.py",
+          "sha256": "ea3dae2fdb24a2fb96efd4826a5315de9f5643780ca40e2aad5f678d07075551"
+        },
+        {
+          "path": "build175-artifacts/package-manifest.json",
+          "sha256": "5d9f1ad22e5ed61d4639489daaca6286b9e5ab2f357601345ebb7bc927405343"
+        }
+      ],
+      "packager_intent": "Package Build 175 as iDeck-Build175-SoftJumbo.ipa with full code signature on all frameworks and dylibs.",
+      "capture_summary": {
+        "max_lines": 14020,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "2d8e0c10fabc35be3afb7b0ab9b24d1f3710600421846f9b9336fde29790928c",
+      "packager_note_present": false
+    },
+    {
+      "number": 176,
+      "variant": "base",
+      "title": "release·reaper·예외진단",
+      "intent": "예약단위/반납/안전한메모리검사를조정",
+      "observed": "분석·패키지·실기기기록존재",
+      "limit": "전체CEF초기화미확정",
+      "refs": [
+        "174"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 2,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build176-artifacts/package-build176.py",
+          "sha256": "112f59197a75cf6c23b7f0c0d51d36461743ef878d0f3b54adb4371f1711e334"
+        },
+        {
+          "path": "build176-artifacts/package-manifest.json",
+          "sha256": "ebebeb635900a598adf01039894d2a3a66116d2ec5755fffe4cb24e3e31a13c9"
+        }
+      ],
+      "packager_intent": "Package Build 176 as iDeck-Build176-SoftRelease.ipa with soft-pool free fix and safe reap.",
+      "capture_summary": {
+        "max_lines": 29360,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "39ad94df2055898df2d79fd518346cb7d905572b07192b585fd301120ed889f0",
+      "packager_note_present": false
+    },
+    {
+      "number": 177,
+      "variant": "base",
+      "title": "중첩soft range 식별",
+      "intent": "실패조건과실제수정의층위를분리",
+      "observed": "서로겹친1 GiB급범위확인",
+      "limit": "bounded실행과전체세션성공구분",
+      "refs": [
+        "overlap"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build177-artifacts/package-build177.py",
+          "sha256": "599b2fc04477064147d735bf1f39edd7db78e951d3349663f30509e3d306327e"
+        },
+        {
+          "path": "build177-artifacts/package-manifest.json",
+          "sha256": "7dabd8204559fc0e3e2a64e97b2e7ee45bbe8c9ae361847858d6b32e32fa52a5"
+        }
+      ],
+      "packager_intent": "Package Build 177 as iDeck-Build177-BulkFreeGuard.ipa with FEX bulk free guard, ImageTracker recovery, and high-gap soft pool fix.",
+      "capture_summary": {
+        "max_lines": 14079,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "5a3d0bead9a4de41286b688939394f78899bd83f358952bdea87f89ec77ac2ec",
+      "packager_note_present": false
+    },
+    {
+      "number": 178,
+      "variant": "base",
+      "title": "실제후보범위검사",
+      "intent": "실패조건과실제수정의층위를분리",
+      "observed": "중첩수정후에도CEF/FEX실패잔존",
+      "limit": "bounded실행과전체세션성공구분",
+      "refs": [
+        "overlap"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 2,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build178-artifacts/package-build178.py",
+          "sha256": "9f0fb03a8f014862a039120a82db444587e0f09c63893beb6098b0afaddddf2c"
+        },
+        {
+          "path": "build178-artifacts/package-manifest.json",
+          "sha256": "904051663f6c8710738f55bb603a087bdc8457ee504c25dafa9c08cc361f44bb"
+        }
+      ],
+      "packager_intent": "Package Build 178 as iDeck-Build178-SoftPoolRanges.ipa with FEX bulk free guard, ImageTracker recovery, and high-gap soft pool fix.",
+      "capture_summary": {
+        "max_lines": 16711,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "808ff253dda73865065093453e4776feabbf30fdfe0ad6a641100722d6a16a8e",
+      "packager_note_present": false
+    },
+    {
+      "number": 179,
+      "variant": "base",
+      "title": "큰예약수명검증",
+      "intent": "실패조건과실제수정의층위를분리",
+      "observed": "명시적해제와프로세스회수합쳐live view대조",
+      "limit": "bounded실행과전체세션성공구분",
+      "refs": [
+        "lifetime"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 2,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build179-artifacts/package-build179.py",
+          "sha256": "b37213917797f37eea4635325dd51119a5f11cc93b70be660299d1fe95a847e5"
+        },
+        {
+          "path": "build179-artifacts/package-manifest.json",
+          "sha256": "afa0c87e63899d2e079fa17cc23caea9c883f7aebe601f3557402e143f243cb2"
+        }
+      ],
+      "packager_intent": "Package Build 179 as iDeck-Build179-SpanLifecycle.ipa with FEX bulk free guard, ImageTracker recovery, and high-gap soft pool fix.",
+      "capture_summary": {
+        "max_lines": 23971,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "af247ff5b562663a63f48d5d07cb59a023e495ee566f8d34dccaf83b9dfb1412",
+      "packager_note_present": false
+    },
+    {
+      "number": 180,
+      "variant": "base",
+      "title": "decoder축소·fatal계측",
+      "intent": "실패조건과실제수정의층위를분리",
+      "observed": "allocator정렬assertion의소스줄확인",
+      "limit": "bounded실행과전체세션성공구분",
+      "refs": [
+        "180"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "cef",
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build180-artifacts/package-build180.py",
+          "sha256": "c488d543a8fc0a93a0e99bab10a4c5e0b662cbf0d35ba05faf086736c5663c57"
+        },
+        {
+          "path": "build180-artifacts/package-manifest.json",
+          "sha256": "06e8974a61373b201e5031ebe1ffaa0ad1877a126390ba6f330296078f75b905"
+        }
+      ],
+      "packager_intent": "Package Build 180 as iDeck-Build180-DecoderCompact.ipa with compact FEX decoder and read-only CEF fatal-site diagnostics.",
+      "capture_summary": {
+        "max_lines": 14268,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "74231480974ce0e2222ba5e63039b5921b6caa207f2578c895d37947cf4a3d61",
+      "packager_note_present": false
+    },
+    {
+      "number": 181,
+      "variant": "base",
+      "title": "pool 정렬",
+      "intent": "실패조건과실제수정의층위를분리",
+      "observed": "fatal이다음commit조건으로이동",
+      "limit": "bounded실행과전체세션성공구분",
+      "refs": [
+        "181"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "cef",
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build181-artifacts/package-build181.py",
+          "sha256": "6aa9429d94ccd26a43469377257df88b47f1bbadfdae493a1305b76b712762ec"
+        },
+        {
+          "path": "build181-artifacts/package-manifest.json",
+          "sha256": "a649206c3b2b54dd2035d6142be3e27c5434988ee3ab5034783bdc64f026382f"
+        }
+      ],
+      "packager_intent": "Package Build 181 as iDeck-Build181-SoftPoolAlignment.ipa with aligned regular/BRP soft-pool reservations.",
+      "capture_summary": {
+        "max_lines": 13861,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "463a4af5e328a412862a818388320c7dabcd4c9bb77ee2160b2d14f18f0a9d23",
+      "packager_note_present": false
+    },
+    {
+      "number": 182,
+      "variant": "base",
+      "title": "IR half 2 MiB",
+      "intent": "실패조건과실제수정의층위를분리",
+      "observed": "실제버퍼축소적용,CEF commit실패잔존",
+      "limit": "bounded실행과전체세션성공구분",
+      "refs": [
+        "181"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build182-artifacts/package-build182.py",
+          "sha256": "ebdd7543f366415e9bf4c98a749fa60f118c6e2bf3b41d9ea2513a1841a15610"
+        },
+        {
+          "path": "build182-artifacts/package-manifest.json",
+          "sha256": "6c5105aa7d019d6f215a4a7fd4582a992fe6f72c90a3a7d03171038033ba8dc7"
+        }
+      ],
+      "packager_intent": "Package Build 182 as iDeck-Build182-IRCapacity.ipa with compact FEX decoder and read-only CEF fatal-site diagnostics.",
+      "capture_summary": {
+        "max_lines": 15546,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "ee7a701941b5ab4893734862bd36f0e310da8200edda12be30971eb78bfd9e23",
+      "packager_note_present": false
+    },
+    {
+      "number": 183,
+      "variant": "base",
+      "title": "owned regular 인수",
+      "intent": "실패조건과실제수정의층위를분리",
+      "observed": "slot0 ADOPT;다음약8 MiB CallRet실패",
+      "limit": "bounded실행과전체세션성공구분",
+      "refs": [
+        "181"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build183-artifacts/package-build183.py",
+          "sha256": "afde4b63a8ef4b352f0716653b028453eaabddabc04549b8710f6a469f9a24b3"
+        },
+        {
+          "path": "build183-artifacts/package-manifest.json",
+          "sha256": "89acab1e9659ed6b4afec3c35e040f25711ffa51029737ae9b50c1b6424922a4"
+        }
+      ],
+      "packager_intent": "Package Build 183 as iDeck-Build183-OwnedRegular.ipa with aligned regular/BRP soft-pool reservations.",
+      "capture_summary": {
+        "max_lines": 14358,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "11e81f907022dc0f9deb66315a909365b3ce36832b1c6cfcedc3be5b804e520c",
+      "packager_note_present": false
+    },
+    {
+      "number": 184,
+      "variant": "base",
+      "title": "CallRet 1 MiB",
+      "intent": "실패조건과실제수정의층위를분리",
+      "observed": "기존FEX실패부재bounded캡처;libcef대형pool trap",
+      "limit": "bounded실행과전체세션성공구분",
+      "refs": [
+        "184"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 3,
+      "lanes": [
+        "cef",
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build184-artifacts/package-build184.py",
+          "sha256": "ab867dd18fa924026627ad57d2a31f59b5123b68e391caaeee56b50bfb15ef09"
+        },
+        {
+          "path": "build184-artifacts/package-manifest.json",
+          "sha256": "1c218c655b22b0c223caee824c018e1753fad32c12f33aa7cd30529adda384fb"
+        }
+      ],
+      "packager_intent": "Package Build 184 as iDeck-Build184-CompactCallRet.ipa with compact FEX decoder and read-only CEF fatal-site diagnostics.",
+      "capture_summary": {
+        "max_lines": 23589,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "afac36930d8b19d7a00d2abb6bd01200e41e633bc599301f531d1baab5fd93b0",
+      "packager_note_present": false
+    },
+    {
+      "number": 185,
+      "variant": "base",
+      "title": "native compact hold/layout 후보",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 2,
+      "lanes": [
+        "cef",
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build185-artifacts/package-build185.py",
+          "sha256": "c2732f0878c8aaba0e1fa960a3a83e66b1203afc849eedb2061d538ac68f4eac"
+        },
+        {
+          "path": "build185-artifacts/package-manifest.json",
+          "sha256": "4f7735ded5b1c1fe5f17ffa82bd29cea9e82fd9385067db0f2e8e6a2bac6f415"
+        }
+      ],
+      "packager_intent": "Resign Build 184 with the Increased Memory Limit entitlement its profile already grants.",
+      "capture_summary": {
+        "max_lines": 13430,
+        "short_le_100_lines": 0,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "bdf1a7dfef9289a0bae1b471106c87ca60bf37676a0958723e661ae17f95464c",
+      "packager_note_present": false
+    },
+    {
+      "number": 186,
+      "variant": "base",
+      "title": "compact pool 후속 후보",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 6,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build186-artifacts/package-manifest.json",
+          "sha256": "1f0c5115ae4209ec771ac506aeb36134ff314552dcf0ccc89eff088039e340b0"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 19355,
+        "short_le_100_lines": 2,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "42ba49903696ae0803a1d40a3e0e98d419b5a11b6500ade098bba34306b0004a",
+      "packager_note_present": false
+    },
+    {
+      "number": 187,
+      "variant": "base",
+      "title": "아레나/초기화 후속",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 3,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build187-artifacts/package-manifest.json",
+          "sha256": "2b395ca569cc14bfb6c84c7f060bf14fb80f5f555cad80a8cfa63f9012048292"
+        }
+      ],
+      "capture_summary": {
+        "max_lines": 19722,
+        "short_le_100_lines": 2,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "d6d49751e51b5ffbad77da3bee80d18ca2b4446de02c8c333fa31dc1e18bd8ee",
+      "packager_note_present": false
+    },
+    {
+      "number": 188,
+      "variant": "base",
+      "title": "FEX ladder·high-window",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 5,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build188-artifacts/package-build188.py",
+          "sha256": "6e88ffb19bcf588bd0094f7585e984f307df8c7ac19f974f1cf408fd9c14c5b7"
+        },
+        {
+          "path": "build188-artifacts/package-manifest.json",
+          "sha256": "d94235ddde0eb554326dec062dc11433a652ab0b048f11bc42ebe1f1cdd2c76f"
+        }
+      ],
+      "packager_intent": "",
+      "capture_summary": {
+        "max_lines": 30791,
+        "short_le_100_lines": 3,
+        "fex_failure_any": true,
+        "browserready_any": false
+      },
+      "package_sha256": "8a302fbcae41ecb4e8e7d9c338c1e2d316db7c98ff758789796fa8244739f32c",
+      "packager_note_present": false
+    },
+    {
+      "number": 189,
+      "variant": "base",
+      "title": "increased-memory-limit 유지",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "실행로그 increased=true/EVA=false;512 GiB상한·16 GiB FEX",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "memory"
+      ],
+      "local_inputs": [
+        {
+          "path": "build189-artifacts/package-build189.py",
+          "sha256": "fb06e06f401653f06563d5d38443bac46762325ad4e37e7415e2a1590baac20d"
+        },
+        {
+          "path": "build189-artifacts/package-manifest.json",
+          "sha256": "ef61840f7d3fec5ffda73fc2a9b7da9ca587eb244d7bf3b2da60ecf3eb409416"
+        }
+      ],
+      "packager_intent": "Resign Build 188, keeping the Increased Memory Limit its profile already grants.",
+      "capture_summary": {
+        "max_lines": 35311,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "61fa137cd738ddb6a359464c2591fd26038c874c3b2728652346fafeafd62884",
+      "packager_note_present": true
+    },
+    {
+      "number": 190,
+      "variant": "base",
+      "title": "powrprof delay-load",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build190-artifacts/package-build190.py",
+          "sha256": "f99a8a61e241cb753a2a3f4e410dae882558303defa93f622541cabd585b3c2f"
+        },
+        {
+          "path": "build190-artifacts/package-manifest.json",
+          "sha256": "18bd9a369a920ab7dc1ef511b30232e898f4f501f5ac76a34700bdfbdf28c309"
+        }
+      ],
+      "packager_intent": "Build 190: Build 189 plus an ARM64EC powrprof.dll.",
+      "capture_summary": {
+        "max_lines": 24128,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "8245b5342766a765242908e12e8a3881cc25653210e09e82ec6303c396dcbb03",
+      "packager_note_present": true
+    },
+    {
+      "number": 191,
+      "variant": "base",
+      "title": "wevtapi·power export",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build191-artifacts/package-build191.py",
+          "sha256": "8c17baa8b29b367611f356b06264aba2e6c4c7f466d4194592db5e82b2a03356"
+        },
+        {
+          "path": "build191-artifacts/package-manifest.json",
+          "sha256": "d1fe34a8b979ba51478c2fb7eea46260b65306664e104b6be6b1e014409003b0"
+        }
+      ],
+      "packager_intent": "Build 191: Build 189 plus an ARM64EC powrprof.dll.",
+      "capture_summary": {
+        "max_lines": 23645,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "134146cf407075d96d98376b2d1dca39868663637551f2255ced22b5d74d31c8",
+      "packager_note_present": true
+    },
+    {
+      "number": 192,
+      "variant": "base",
+      "title": "dxgi delay-load",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build192-artifacts/package-build192.py",
+          "sha256": "a6fae8855e7bc2e4789ef29acce00b4c2bd6572c8db6efac2eabc7f6e39e239f"
+        },
+        {
+          "path": "build192-artifacts/package-manifest.json",
+          "sha256": "b430b6f3dc22da1fa976f123eeaed2c1443fa48872f6cc6d1696ab084c87b7fb"
+        }
+      ],
+      "packager_intent": "Build 192: Build 189 plus an ARM64EC powrprof.dll.",
+      "capture_summary": {
+        "max_lines": 29661,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "279d40840ad57045a82acbf4eb2fdb9521547440d483692a3d94651fa028bc53",
+      "packager_note_present": true
+    },
+    {
+      "number": 193,
+      "variant": "base",
+      "title": "stack overflow 프레임 계측",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build193-artifacts/package-build193.py",
+          "sha256": "07f0edd0ed0d2a14b110f27792c067719ba385d0a6c26d305f98616dc2d3ef79"
+        },
+        {
+          "path": "build193-artifacts/package-manifest.json",
+          "sha256": "57a17deb48f1d05c052c5f49fbf05f0cf5e7ff45166d3dfad574c8179d23423b"
+        }
+      ],
+      "packager_intent": "Build 193: Build 192 host plus the ml426 stack-overflow caller probe.",
+      "capture_summary": {
+        "max_lines": 35458,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "c52e6d619c311467eb89753078ab684c7b200e4a0a7ec09a21eabad17e4496d1",
+      "packager_note_present": true
+    },
+    {
+      "number": 194,
+      "variant": "base",
+      "title": "wake fault return 계측",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build194-artifacts/package-build194.py",
+          "sha256": "37e59d6acea43b9570a338984be3e3bed3d18cf7f8e2a796e5a8e72163f736b4"
+        },
+        {
+          "path": "build194-artifacts/package-manifest.json",
+          "sha256": "07e5a87fcbe91417d6b71bd0e5b6dbb666e09a9ecd11c3ba658295bc8aff6580"
+        }
+      ],
+      "packager_intent": "Build 194: Build 193 host plus the ml427 thunk-caller probe.",
+      "capture_summary": {
+        "max_lines": 34400,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "8e88b5abe3c04a93dbf1d6780e0cf5e10ece408e333d6d892fcd71eaeaf9d3ed",
+      "packager_note_present": true
+    },
+    {
+      "number": 195,
+      "variant": "base",
+      "title": "RtlWakeAddressAll 작은 batch",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build195-artifacts/package-build195.py",
+          "sha256": "185ba51790d5d4b4e1d74b852435fd07f0ebcc06f3f17cc21e7399b5298ed8ba"
+        },
+        {
+          "path": "build195-artifacts/package-manifest.json",
+          "sha256": "9c9e38f5e63b62406de20706b5bc4367122e7c2a98713a44de6bd800ca980d03"
+        }
+      ],
+      "packager_intent": "Build 195: Build 194 host plus a small RtlWakeAddressAll frame.",
+      "capture_summary": {
+        "max_lines": 3383,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "7700440d4ea104d1070d0f79576facc82f74a442c3b01bebb2a197881418bfd1",
+      "packager_note_present": true
+    },
+    {
+      "number": 196,
+      "variant": "base",
+      "title": "ARM64X ntdll wake 후보",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build196-artifacts/package-build196.py",
+          "sha256": "88dd7c77cbbb62aeea9520f25aff9f35e25813c5dd4191cfb5d900e663aed111"
+        },
+        {
+          "path": "build196-artifacts/package-manifest.json",
+          "sha256": "6adfb3b002a3177361a1d129dbea3adeede290c34219616b20e3a1ec1945654e"
+        }
+      ],
+      "packager_intent": "Build 196: Build 194 baseline with binary-patched ARM64X ntdll.dll (RtlWakeAddressAll frame reduced to 16 handles).",
+      "capture_summary": {
+        "max_lines": 19225,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "aa2e7ccd4775a167bac50bc2916ab4a91d16f731b37e2cdd98d47d2ab6840b74",
+      "packager_note_present": true
+    },
+    {
+      "number": 197,
+      "variant": "base",
+      "title": "Chromium stack floor 16 MiB",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "runtime"
+      ],
+      "local_inputs": [
+        {
+          "path": "build197-artifacts/package-build197.py",
+          "sha256": "a4855380206117fa67f65fd3366541d3bf6d190b8e092dc8f45defbd011fa206"
+        },
+        {
+          "path": "build197-artifacts/package-manifest.json",
+          "sha256": "1bbb1d8b2d1e4bd1f335016fa324cd923a3621fc8928eb53245ed4557ff3f620"
+        }
+      ],
+      "packager_intent": "Build 197: Build 196 baseline + 16MB thread stack floor in Madeira.debug.dylib.",
+      "capture_summary": {
+        "max_lines": 20914,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "bec7382e6aed3180a503d3ccbc9a1461816a844fbdea482a713e72f6924265c9",
+      "packager_note_present": true
+    },
+    {
+      "number": 198,
+      "variant": "base",
+      "title": "ResourceBundle recursion 후보",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 3,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build198-artifacts/package-build198.py",
+          "sha256": "9f591a7a2084f6c911be26ce90681d493e43cf96b604c742b2876e8a03092e05"
+        },
+        {
+          "path": "build198-artifacts/package-manifest.json",
+          "sha256": "99389b9178508ecbebd6ba644f78199acaabec8cd63f4a5840c0d12a0775563e"
+        }
+      ],
+      "packager_intent": "Build 198: Build 197 baseline + Break CEF ResourceBundle recursion + Unhide rendered frames.",
+      "capture_summary": {
+        "max_lines": 36472,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "f591af2ad7069f8154d758911951132c8079fca9c428941b6c5dbf3999fb1c9c",
+      "packager_note_present": true
+    },
+    {
+      "number": 199,
+      "variant": "base",
+      "title": "FEX frame-walk 후보",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build199-artifacts/package-build199.py",
+          "sha256": "e0549fcd293489fc50b1b990f3124f11ae6033277137292905ed5595ddff7494"
+        },
+        {
+          "path": "build199-artifacts/package-manifest.json",
+          "sha256": "7efea9f632699537526f54ed505c887d5bfde5750d3857959173b7e8fbec429e"
+        }
+      ],
+      "packager_intent": "Build 199: Build 198 baseline + Fix FEX WritePriorityMutex unmapped stack dereference crash.",
+      "capture_summary": {
+        "max_lines": 26433,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "707799b6715966c6075b4ffc31129597ccebfd0981e9e1194bd3d0a633a2dea4",
+      "packager_note_present": true
+    },
+    {
+      "number": 200,
+      "variant": "base",
+      "title": "UI builtin 추가",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build200-artifacts/package-build200.py",
+          "sha256": "6e273ecbce48bd4d28184584aaae1d4729026fd9e8a2a58eed58990d1811e3f6"
+        },
+        {
+          "path": "build200-artifacts/package-manifest.json",
+          "sha256": "6497997188dd1efacd8561b987362b17c608fc60bb0ef6664985d57279680d4c"
+        }
+      ],
+      "packager_intent": "Build 200: Build 199 baseline + Add missing ARM64EC Windows builtins for CEF/Steam.",
+      "capture_summary": {
+        "max_lines": 25027,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "690fe793b1f16419fe36eb4dd6b238d4a6d5f5572866f2ef2ecff4e0104de85d",
+      "packager_note_present": true
+    },
+    {
+      "number": 201,
+      "variant": "base",
+      "title": "실제로 사용되는xtajit갱신",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build201-artifacts/package-build201.py",
+          "sha256": "caa4b6720932603446ab7ff784874d19a673db33447bfa4901014481dc0620ea"
+        },
+        {
+          "path": "build201-artifacts/package-manifest.json",
+          "sha256": "36fecbc89d3526ad4206850b0d6050f5d92dbf90c7cec0e33ca86e18619ebe6d"
+        }
+      ],
+      "packager_intent": "Build 201: Fix xtajit64.dll WritePriorityMutex frame-walk crash at 0x9d08.",
+      "capture_summary": {
+        "max_lines": 27799,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "d6a5ad71a7e10ea3c25a6bcf38fc2b74a87fc0133361d137136786230f3dc6db",
+      "packager_note_present": true
+    },
+    {
+      "number": 202,
+      "variant": "base",
+      "title": "exception dispatcher 인수 전달",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build202-artifacts/package-build202.py",
+          "sha256": "7a77f9404a3a29072827a9f399cf3c8165fc10d090a37707388eaec2e9e9ecac"
+        },
+        {
+          "path": "build202-artifacts/package-manifest.json",
+          "sha256": "96286c9627e84bbb3decd3f25d73cf8897d2c9c16f08e3acbc05497484079507"
+        }
+      ],
+      "packager_intent": "Build 202: Fix KiUserExceptionDispatcher argument forwarding to x64 exception hook.",
+      "capture_summary": {
+        "max_lines": 23345,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "abd734f7c8c02d8510ed9f9f53b6bdfcd60eca7aa587c369fcafb21d11c40c46",
+      "packager_note_present": true
+    },
+    {
+      "number": 203,
+      "variant": "base",
+      "title": "vtable·Crashpad VEH 후보",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 10,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build203-artifacts/package-build203.py",
+          "sha256": "6295b60452b6b7759b2d38b3fd36744e849218ca93b0f2e721d1740c3e972023"
+        },
+        {
+          "path": "build203-artifacts/package-manifest.json",
+          "sha256": "32224aae8b4615896c9f928ef28a4a1e268021f6541f26a96edfcf881ffdb9cd"
+        }
+      ],
+      "packager_intent": "Build 203: Fix CEF ResourceBundle NULL delegate call & Disable Crashpad VEH crash.",
+      "capture_summary": {
+        "max_lines": 27174,
+        "short_le_100_lines": 3,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "8785712de681fc6789cce5a4f5b362ae09b0a2dc902480d69714ee2558ff1d23",
+      "packager_note_present": true
+    },
+    {
+      "number": 204,
+      "variant": "base",
+      "title": "surface/visibility",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "visible대형창·present4회;CEF로그별도수집부족",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "review"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 2,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build204-artifacts/package-build204.py",
+          "sha256": "84cad90f4f2f1bbc952a349976adb060276eae5fa16c6df0fdd04d4ccdca2531"
+        },
+        {
+          "path": "build204-artifacts/package-manifest.json",
+          "sha256": "5a633b12f4f82fb1755f2df52c834c40a80e3a3936be569fd0c3f90cb84fee91"
+        }
+      ],
+      "packager_intent": "Build 204: Force Steam window visibility & surface creation to present real UI frames.",
+      "capture_summary": {
+        "max_lines": 98151,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "42451fc930a839fe3d1b6d20287e52b5a9ef8247ad121b0111b1670c5ea319f5",
+      "packager_note_present": true
+    },
+    {
+      "number": 205,
+      "variant": "base",
+      "title": "Chromium stack floor 64 MiB",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "close"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": true,
+      "capture_files": 1,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build205-artifacts/package-build205.py",
+          "sha256": "3a8ce4becf92ce5139a3c3cccb75d1d59a8f7cd829d9c6ccb4a8c064df601839"
+        },
+        {
+          "path": "build205-artifacts/package-manifest.json",
+          "sha256": "fd7d1e5579fdcd018574f0665136e732c1704c0f00857dd007207717d10856b4"
+        }
+      ],
+      "packager_intent": "Build 205: Expand Chromium thread stack floor to 64MB (0x4000000) for steamwebhelper.exe.",
+      "capture_summary": {
+        "max_lines": 23892,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      },
+      "package_sha256": "98434286936102cadc71a7c2bc57e7b64525d8996f433f9a01f0323e403f0a12",
+      "packager_note_present": true
+    },
+    {
+      "number": 206,
+      "variant": "base",
+      "title": "GetGuiResources assertion 후보",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "close"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 1,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build206-artifacts/package-build206.py",
+          "sha256": "8894585383499f52cb849f39076b72b6b4010a4facf9054de533c3e2c1110504"
+        }
+      ],
+      "packager_intent": "Build 206: Resolve GetGuiResources assertion crash (0x187820b12 int3) in steamwebhelper.exe.",
+      "capture_summary": {
+        "max_lines": 22429,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 207,
+      "variant": "base",
+      "title": "추가 telemetry assertion 후보",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "close"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 1,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build207-artifacts/package-build207.py",
+          "sha256": "3bfae8bf77236634a6bc816155956d6fe3d41b0a105248b0a310c08f2c72cbc1"
+        }
+      ],
+      "packager_intent": "Build 207: Eliminate CEF/Chromium Assertion Watchdog Crashes:",
+      "capture_summary": {
+        "max_lines": 23064,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 208,
+      "variant": "base",
+      "title": "telemetry sampler 우회 후보",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "close"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 2,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build208-artifacts/package-build208.py",
+          "sha256": "5f4f280868fc3def3877b8e0d890990b5a76ea576bc0eaa02fe56e9013315fb6"
+        }
+      ],
+      "packager_intent": "Build 208: Fully Eliminate Chromium Telemetry Sampler Assertion Crashes:",
+      "capture_summary": {
+        "max_lines": 28131,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 209,
+      "variant": "base",
+      "title": "Chromium stack floor128 MiB",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "close"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 1,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build209-artifacts/package-build209.py",
+          "sha256": "91cf5d4cc733804ce28a81522d01485ad78818c2dae4920e95e10bfc31bfc32e"
+        }
+      ],
+      "packager_intent": "Build 209: 128MB Chromium Stack Floor to eliminate c00000fd stack overflow:",
+      "capture_summary": {
+        "max_lines": 20866,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 210,
+      "variant": "base",
+      "title": "backtrace/recursion 진단",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "close"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 3,
+      "lanes": [
+        "cef",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build210-artifacts/package-build210.py",
+          "sha256": "55d3c24175ad77df32e4140a6884b25a18388fb8930d6e6e50a383d1e3fa751d"
+        }
+      ],
+      "packager_intent": "Build 210: Instrument Stack Backtrace & Arbitrary-Period Recursion Detector in signal_arm64_ios.c:",
+      "capture_summary": {
+        "max_lines": 36281,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 211,
+      "variant": "base",
+      "title": "CEF event·Crashpad 공유",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "close"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 3,
+      "lanes": [
+        "ipc",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build211-artifacts/package-build211.py",
+          "sha256": "68d62c47b1826048ddf992a667efe86073b7cb9b3ce2d73195544c7e7d4e6650"
+        }
+      ],
+      "packager_intent": "Build 211: Resolve CEF IPC Event Starvation and Crashpad File Sharing Deadlock:",
+      "capture_summary": {
+        "max_lines": 34953,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 212,
+      "variant": "base",
+      "title": "MasterStream mapping·alert",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "close"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 1,
+      "lanes": [
+        "ipc",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build212-artifacts/package-build212.py",
+          "sha256": "b6199df47254bc7771559159fcfb175f05fd0b5340d6a9688c035256e3f50958"
+        }
+      ],
+      "packager_intent": "Build 212: SteamChrome MasterStream IPC Unlink & Batch Alert Starvation Fix:",
+      "capture_summary": {
+        "max_lines": 22552,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 213,
+      "variant": "base",
+      "title": "event 보존·OBJ_OPENIF",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "close"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 1,
+      "lanes": [
+        "ipc",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build213-artifacts/package-build213.py",
+          "sha256": "a4298bdd0a6b3c0ef4dd7fc17555e5073fd5abce755f031da1c4211c625a69c5"
+        }
+      ],
+      "packager_intent": "Build 213: Fix SteamChrome MasterStream IPC Connection & Enable Batch Alert Delivery:",
+      "capture_summary": {
+        "max_lines": 25937,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 214,
+      "variant": "base",
+      "title": "CALayer·StackSamplingProfiler",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "close"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 2,
+      "lanes": [
+        "ipc",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build214-artifacts/package-build214.py",
+          "sha256": "14903129c49b4ecfb241c685f4216434cad140e32aea60c332a4a6baea25e093"
+        }
+      ],
+      "packager_intent": "Build 214: Fix CALayer Occlusion & Disable StackSamplingProfiler:",
+      "capture_summary": {
+        "max_lines": 33383,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 215,
+      "variant": "base",
+      "title": "sync wake 후보 교체",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "close"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 1,
+      "lanes": [
+        "ipc",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build215-artifacts/package-build215.py",
+          "sha256": "1681a4c85858eb81e8049cecbbcaea9f206090b018faf969fbae15fe796c297b"
+        }
+      ],
+      "packager_intent": "Build 215: Package Build 215 with clean Wine sync.c alert wakes and CALayer occlusion fix.",
+      "capture_summary": {
+        "max_lines": 30826,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 216,
+      "variant": "base",
+      "title": "init_thread suspend reset",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "패키징 설명·보존 캡처를 아래 목록에서 구분한다.",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "close"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 2,
+      "lanes": [
+        "ipc",
+        "render"
+      ],
+      "local_inputs": [
+        {
+          "path": "build216-artifacts/package-build216.py",
+          "sha256": "21850fe101cbc6418f741671dd4d412b212ec7029bf764141df66e9d8a965e50"
+        }
+      ],
+      "packager_intent": "Build 216: Package Build 216 with wineserver init_thread worker suspend reset fix.",
+      "capture_summary": {
+        "max_lines": 23574,
+        "short_le_100_lines": 1,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    },
+    {
+      "number": 217,
+      "variant": "base",
+      "title": "dead guest-view reclaim",
+      "intent": "해당제목은변경의도이며성공판정이아니다.",
+      "observed": "기본후보는cmd프리앰블정지;bands후속증거는별도탭",
+      "limit": "patch확인/캡처존재≠통합성공",
+      "refs": [
+        "b217"
+      ],
+      "quality": "documented",
+      "artifact_directory": true,
+      "package_manifest": false,
+      "capture_files": 3,
+      "lanes": [
+        "cef",
+        "ipc",
+        "memory",
+        "render",
+        "runtime",
+        "status"
+      ],
+      "local_inputs": [
+        {
+          "path": "build217-artifacts/package-build217.py",
+          "sha256": "cb7fa4178ff7f94b604ef4bef22d8091311818b7b4d410f3e0ca3bd5b473a85d"
+        }
+      ],
+      "packager_intent": "Build 217: Package Build 217 with dead pseudo-process guest view reclaim.",
+      "capture_summary": {
+        "max_lines": 24918,
+        "short_le_100_lines": 0,
+        "fex_failure_any": false,
+        "browserready_any": false
+      }
+    }
+  ],
+  "bands": [
+    {
+      "id": "v1",
+      "title": "기본217 → cmd 경로",
+      "state": "기본",
+      "intent": "start/config_guard가Steam도달을막는경우",
+      "observed": "spawn chain을exe단위로나누고채널설정과실제로그를대조",
+      "limit": "기본217의reclaim실행검증에도달하지못한케이스",
+      "refs": [
+        "b217"
+      ]
+    },
+    {
+      "id": "v2",
+      "title": "ml462b: startup V1/V2/V3",
+      "state": "부분",
+      "intent": "start.exe제거·config_guard opt-in",
+      "observed": "cmd→steam→webhelper chain 보고",
+      "limit": "재기동체인진전;CodeRange FULL잔존",
+      "refs": [
+        "u"
+      ]
+    },
+    {
+      "id": "v3",
+      "title": "ml462c: near-builtins hole #0",
+      "state": "관측",
+      "intent": "513 MB선점→보호→claim",
+      "observed": "zone=coderange-hole 성공기록",
+      "limit": "한CodeRange예약의성공만인정",
+      "refs": [
+        "u"
+      ]
+    },
+    {
+      "id": "u28",
+      "title": "U28: UI와CodeRange 기준",
+      "state": "부분",
+      "intent": "비timeout실행과후속비교",
+      "observed": "DLW/CodeRange보고를현재세션시간으로구분",
+      "limit": "장기UI안정성미확정",
+      "refs": [
+        "final"
+      ]
+    },
+    {
+      "id": "u34",
+      "title": "U34: P1 request·FD 식별",
+      "state": "관측",
+      "intent": "req84=read_process_memory;req83정정",
+      "observed": "client/reply/server FD대응을추적",
+      "limit": "해당재현의FD오배송가설과전체프로토콜을구분",
+      "refs": [
+        "final"
+      ]
+    },
+    {
+      "id": "u35",
+      "title": "U35: 응답·inflight 대조",
+      "state": "관측",
+      "intent": "dispatch/sndreply 완료와FD pairing",
+      "observed": "보존 보고에서 FD 오배송(H1)·inflight 불일치(H5) 가설을 해당 재현 범위에서 일부 배제했다.",
+      "limit": "모든스레드/실행에서배제된것은아님",
+      "refs": [
+        "final"
+      ]
+    },
+    {
+      "id": "u36",
+      "title": "U36: partial reply drain",
+      "state": "관측",
+      "intent": "write_reply EAGAIN→POLLOUT drain",
+      "observed": "약134 MB reply 완료(wreply-done)보고",
+      "limit": "단건완료와watchdog기한내누적완료는별개",
+      "refs": [
+        "final"
+      ]
+    },
+    {
+      "id": "u37",
+      "title": "U37: 큰 전송 완료와timeout",
+      "state": "부분",
+      "intent": "read+write 누적시간과watchdog순서",
+      "observed": "전달완료해도종료가남는보고",
+      "limit": "영구FD정지설명만으로잔존종료를설명할수없음",
+      "refs": [
+        "final"
+      ]
+    },
+    {
+      "id": "u38",
+      "title": "U38: noise 정리·잔존 종료",
+      "state": "종료",
+      "intent": "TLS crashpad cache·DIAG등급·pipe resize best-effort",
+      "observed": "CodeRange유효,watchdog경로와종료후PC상관보고",
+      "limit": "안전한disable발견못함=모든대안불가능증명아님",
+      "refs": [
+        "final"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "original",
+      "path": "diagnostics/build100-to-217-ramification-map.html",
+      "label": "입력 맵 · 6개 범위 노드",
+      "available": true,
+      "scope": "local",
+      "sha256": "39866377a49290386c2114e2cba5fe7f889d5c50267fabf910e21a9dbd359b88"
+    },
+    {
+      "id": "handoff",
+      "path": "iDeck/docs/STEAM64_BUILD152_HANDOFF_2026-11-04.md",
+      "label": "STEAM64_BUILD152_HANDOFF_2026-11-04.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "eec6359f3734101226cb0db9ecf75391f09665b42c8f5970766f0f7d96e72a7d",
+      "href": "STEAM64_BUILD152_HANDOFF_2026-11-04.md"
+    },
+    {
+      "id": "providers",
+      "path": "iDeck/docs/STEAM64_BUILDS153_157_RESULTS_2026-11-05.md",
+      "label": "STEAM64_BUILDS153_157_RESULTS_2026-11-05.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "ae4d53509cc80579b6ee14d7099c3fc217497190faa2425dd42e5a69c734f9fe",
+      "href": "STEAM64_BUILDS153_157_RESULTS_2026-11-05.md"
+    },
+    {
+      "id": "image",
+      "path": "iDeck/docs/STEAM64_BUILDS158_160_MEMORY_2026-11-05.md",
+      "label": "STEAM64_BUILDS158_160_MEMORY_2026-11-05.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "de63dde56168c8e577e3effc227dee2d1272fe62ea76131219093ff813296b6a",
+      "href": "STEAM64_BUILDS158_160_MEMORY_2026-11-05.md"
+    },
+    {
+      "id": "layout",
+      "path": "iDeck/docs/STEAM64_BUILD161_FEX_LAYOUT_2026-11-05.md",
+      "label": "STEAM64_BUILD161_FEX_LAYOUT_2026-11-05.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "23df8273d60b26f79bf2ca833c5b8af46759467d76c8a3ecbcc7eff460260f7a",
+      "href": "STEAM64_BUILD161_FEX_LAYOUT_2026-11-05.md"
+    },
+    {
+      "id": "callret",
+      "path": "iDeck/docs/STEAM64_BUILD162_CALLRET_FIX_2026-11-05.md",
+      "label": "STEAM64_BUILD162_CALLRET_FIX_2026-11-05.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "d2cad759a73b23c9b59e2c20dd867b567de434585eceb889b6a13cc3f2af7465",
+      "href": "STEAM64_BUILD162_CALLRET_FIX_2026-11-05.md"
+    },
+    {
+      "id": "reclaim",
+      "path": "iDeck/docs/STEAM64_BUILD163_RECLAIM_PROCESS_2026-11-05.md",
+      "label": "STEAM64_BUILD163_RECLAIM_PROCESS_2026-11-05.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "f0e129e684e508b97020dd74ad22a72f93ed559b907075fc437e29d2c7e74454",
+      "href": "STEAM64_BUILD163_RECLAIM_PROCESS_2026-11-05.md"
+    },
+    {
+      "id": "soft",
+      "path": "iDeck/docs/STEAM64_BUILDS165_169_ANALYSIS_2026-11-06.md",
+      "label": "STEAM64_BUILDS165_169_ANALYSIS_2026-11-06.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "278870820bc81185d39f7b45e1933debd4cbe6ab4ff12334cf84c6d79691a9be",
+      "href": "STEAM64_BUILDS165_169_ANALYSIS_2026-11-06.md"
+    },
+    {
+      "id": "171",
+      "path": "iDeck/docs/STEAM64_BUILDS171_173_ANALYSIS_2026-11-06.md",
+      "label": "STEAM64_BUILDS171_173_ANALYSIS_2026-11-06.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "54d4d8d6875d5f0d3e4a9aaf1f6ba6b9b0f3f35cf41ba194aeb145263e1c7105",
+      "href": "STEAM64_BUILDS171_173_ANALYSIS_2026-11-06.md"
+    },
+    {
+      "id": "174",
+      "path": "iDeck/docs/STEAM64_BUILDS174_176_ANALYSIS_2026-11-06.md",
+      "label": "STEAM64_BUILDS174_176_ANALYSIS_2026-11-06.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "8ade4773eaec3f96ff1767be48896562537df1a6231f70f5f88547d40d6a137a",
+      "href": "STEAM64_BUILDS174_176_ANALYSIS_2026-11-06.md"
+    },
+    {
+      "id": "overlap",
+      "path": "iDeck/docs/STEAM64_BUILDS177_178_VERIFICATION_2026-11-06.md",
+      "label": "STEAM64_BUILDS177_178_VERIFICATION_2026-11-06.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "e1764cec40baff4520cb7273d55700d63d59ff4de007d29ed29173cfd8295508",
+      "href": "STEAM64_BUILDS177_178_VERIFICATION_2026-11-06.md"
+    },
+    {
+      "id": "lifetime",
+      "path": "iDeck/docs/STEAM64_BUILD179_SPAN_LIFETIME_2026-11-06.md",
+      "label": "STEAM64_BUILD179_SPAN_LIFETIME_2026-11-06.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "103700598876feaa1c8f7915b0f4ac4ce8c8be10b0adaa7725ee3829cc06b25d",
+      "href": "STEAM64_BUILD179_SPAN_LIFETIME_2026-11-06.md"
+    },
+    {
+      "id": "180",
+      "path": "iDeck/docs/STEAM64_BUILD180_SOURCE_MEMORY_2026-11-06.md",
+      "label": "STEAM64_BUILD180_SOURCE_MEMORY_2026-11-06.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "52c5a2d89710927aace3af38a565b2c776d39adfeb8c58804b1b52d4775287df",
+      "href": "STEAM64_BUILD180_SOURCE_MEMORY_2026-11-06.md"
+    },
+    {
+      "id": "181",
+      "path": "iDeck/docs/STEAM64_BUILDS181_183_SOURCE_RESULTS_2026-11-06.md",
+      "label": "STEAM64_BUILDS181_183_SOURCE_RESULTS_2026-11-06.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "5044e680deccca6c1f58a5f5cb0e947ced4c3b828e096bbd5d30977561ab2233",
+      "href": "STEAM64_BUILDS181_183_SOURCE_RESULTS_2026-11-06.md"
+    },
+    {
+      "id": "184",
+      "path": "iDeck/docs/STEAM64_BUILD184_COMPACT_CALLRET_2026-11-06.md",
+      "label": "STEAM64_BUILD184_COMPACT_CALLRET_2026-11-06.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "b958d2cdde4f12597234dc098b83a1cc4f5cfe0d5ddfc3faaa91b8554543d1d6",
+      "href": "STEAM64_BUILD184_COMPACT_CALLRET_2026-11-06.md"
+    },
+    {
+      "id": "abi",
+      "path": "iDeck/docs/STEAM64_LIBCEF_SOURCE_REBUILD_2026-11-06.md",
+      "label": "STEAM64_LIBCEF_SOURCE_REBUILD_2026-11-06.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "10da31bbd374e8b114c4ba26465d5249dc02b7c1420b1f80fc5f44ca0d211c9d",
+      "href": "STEAM64_LIBCEF_SOURCE_REBUILD_2026-11-06.md"
+    },
+    {
+      "id": "ent",
+      "path": "iDeck/docs/STEAM64_MEMORY_ENTITLEMENTS_RECHECK_2026-11-06.md",
+      "label": "STEAM64_MEMORY_ENTITLEMENTS_RECHECK_2026-11-06.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "65235cf9fd6f814b1f40193d60246b0fb927639df6f2c1e0be350c830d4f837c",
+      "href": "STEAM64_MEMORY_ENTITLEMENTS_RECHECK_2026-11-06.md"
+    },
+    {
+      "id": "review",
+      "path": "iDeck/docs/STEAM64_REASSESSMENT_2026-11-07.md",
+      "label": "STEAM64_REASSESSMENT_2026-11-07.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "049ffdc7dae60a7ab61d5a1c212a5b0af8c75ba2b8bca87906300c2bae9d23cb",
+      "href": "STEAM64_REASSESSMENT_2026-11-07.md"
+    },
+    {
+      "id": "close",
+      "path": "iDeck/docs/STEAM64_FINAL_WRAP_UP_2026-11-09.md",
+      "label": "STEAM64_FINAL_WRAP_UP_2026-11-09.md",
+      "available": true,
+      "scope": "repo",
+      "sha256": "69b184e8a3d0be192487cdf1f3f364c382681627df2fe6b48f1d7c177f69bf83",
+      "href": "STEAM64_FINAL_WRAP_UP_2026-11-09.md"
+    },
+    {
+      "id": "b100",
+      "path": "diagnostics/BUILD100_BUILD_GATE.md",
+      "label": "BUILD100_BUILD_GATE.md",
+      "available": true,
+      "scope": "local",
+      "sha256": "87df04b73a098c33b0c5f4be419848614d9c6923d0c6b6182ea273abc02dab08"
+    },
+    {
+      "id": "b101",
+      "path": "diagnostics/BUILD101_PREPARE_AND_COMPILE_STATUS_2026-11-01.md",
+      "label": "BUILD101_PREPARE_AND_COMPILE_STATUS_2026-11-01.md",
+      "available": true,
+      "scope": "local",
+      "sha256": "0ec887e7de25d8dd195f881128f2698c6e45fa4b0c53d83ff6b99bb7f16af019"
+    },
+    {
+      "id": "b124",
+      "path": "build124-artifacts/BUILD124_CHANGELOG.md",
+      "label": "BUILD124_CHANGELOG.md",
+      "available": true,
+      "scope": "local",
+      "sha256": "9e67aee3f037989cd72a083319b481f3b2fad0ddae24f37ba0e967438e32db02"
+    },
+    {
+      "id": "b217",
+      "path": "build217-artifacts/BUILD217_EXECUTION.md",
+      "label": "BUILD217_EXECUTION.md",
+      "available": true,
+      "scope": "local",
+      "sha256": "7ee2a03dad1d5df03480d69b540ba677bcf5621bf7247e9b9506d4a2ed6cd435"
+    },
+    {
+      "id": "u",
+      "path": "diagnostics/extended-va-feasibility-20261108/DEVICE_CAPTURE_ANALYSIS_217BANDS_ML462C_20261108.md",
+      "label": "DEVICE_CAPTURE_ANALYSIS_217BANDS_ML462C_20261108.md",
+      "available": true,
+      "scope": "local",
+      "sha256": "268db8538e673fa4f42c4902f576773ffc24d0ae7bf41caeb87c4d86ec57b39b"
+    },
+    {
+      "id": "final",
+      "path": "diagnostics/extended-va-feasibility-20261108/FINAL_CONCLUSION_WRAPUP_20261109.md",
+      "label": "FINAL_CONCLUSION_WRAPUP_20261109.md",
+      "available": true,
+      "scope": "local",
+      "sha256": "d62cf72afeb98b07b8ddcad5ddcf41a0082bb1bb2a9d4add5cf8680ceb2b6d8d"
+    },
+    {
+      "id": "inputs",
+      "path": "diagnostics/extended-va-feasibility-20261108/AUTHORITATIVE_BUILD_INPUTS.md",
+      "label": "AUTHORITATIVE_BUILD_INPUTS.md",
+      "available": true,
+      "scope": "local",
+      "sha256": "2c71d862e3a46c770fb42708dbc38b2acf1d56ead230da3f93b3f70625fa065b"
+    }
+  ]
+}
